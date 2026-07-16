@@ -1,0 +1,45 @@
+{
+	"name": "keeper-security",
+	"commands": [
+		"std:account:list",
+		"std:account:read",
+		"std:account:create",
+		"std:account:update",
+		"std:account:disable",
+		"std:account:enable",
+		"std:entitlement:list",
+		"std:entitlement:read",
+		"std:test-connection"
+	],
+	"sourceConfig": [
+		{
+			"type": "menu",
+			"label": "Configuration",
+			"items": [
+				{
+					"type": "section",
+					"sectionTitle": "Authentication",
+					"sectionHelpMessage": "Provide connection parameters to interact securely with the target application.",
+					"items": [
+						{
+							"key": "serviceModeApiUrl",
+							"label": "Keeper Commander Service Mode API URL",
+							"type": "text",
+							"required": true,
+							"placeholder": "Your Base API URL Here ( without /api/v2/)"
+						},
+						{
+							"key": "serviceModeApiKey",
+							"label": "Keeper Commander Service Mode API Key",
+							"type": "secret",
+							"required": true,
+							"placeholder": "Your API Key Here"
+						}
+					]
+				}
+			]
+		}
+	],
+	"accountSchema": {},
+	"entitlementSchemas": []
+}
