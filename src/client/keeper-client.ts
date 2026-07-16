@@ -5,7 +5,7 @@ import { SourceConfig } from '../model/config'
 import { handleAPIErrorResponse } from '../utils/api-error'
 import { requireConfigValue } from '../utils/errors'
 
-const POLL_TIMEOUT_MS = 60_000
+const DEFAULT_POLL_TIMEOUT_SECONDS = 60
 const INITIAL_POLL_DELAY_MS = 500
 const MAX_POLL_DELAY_MS = 5_000
 
@@ -13,13 +13,28 @@ function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+function resolvePollTimeoutMs(value: string | number | undefined | null): number {
+    if (value == null || value === '') {
+        return DEFAULT_POLL_TIMEOUT_SECONDS * 1000
+    }
+
+    const seconds = typeof value === 'number' ? value : Number(value)
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+        return DEFAULT_POLL_TIMEOUT_SECONDS * 1000
+    }
+
+    return seconds * 1000
+}
+
 export class KeeperClient {
     private readonly serviceModeApiUrl: string
     private readonly serviceModeApiKey: string
+    private readonly pollTimeoutMs: number
 
     constructor(config: SourceConfig) {
         this.serviceModeApiUrl = requireConfigValue(config?.serviceModeApiUrl, 'serviceModeApiUrl')
         this.serviceModeApiKey = requireConfigValue(config?.serviceModeApiKey, 'serviceModeApiKey')
+        this.pollTimeoutMs = resolvePollTimeoutMs(config?.pollTimeoutSeconds)
     }
 
     private get baseUrl(): string {
@@ -61,7 +76,7 @@ export class KeeperClient {
     }
 
     private async pollRequestResult(requestId: string): Promise<RequestResultResponse> {
-        const deadline = Date.now() + POLL_TIMEOUT_MS
+        const deadline = Date.now() + this.pollTimeoutMs
         let delay = INITIAL_POLL_DELAY_MS
         let isFirstAttempt = true
 
@@ -91,11 +106,12 @@ export class KeeperClient {
             return apiResponse
         }
 
-        throw new ConnectorError('Keeper API poll timed out after 60 seconds')
+        const timeoutSeconds = Math.round(this.pollTimeoutMs / 1000)
+        throw new ConnectorError(`Keeper API poll timed out after ${timeoutSeconds} seconds`)
     }
 
     async testConnection(): Promise<Record<string, never>> {
         await this.executeCommand('this-device')
         return {}
-    }    
+    }
 }

@@ -34,6 +34,13 @@
 							"type": "secret",
 							"required": true,
 							"placeholder": "Your API Key Here"
+						},
+						{
+							"key": "pollTimeoutSeconds",
+							"label": "Keeper Service Mode Poll Timeout (seconds)",
+							"type": "text",
+							"required": false,
+							"placeholder": "Default is 60 seconds"
 						}
 					]
 				}

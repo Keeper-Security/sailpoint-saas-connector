@@ -30,6 +30,27 @@ describe('KeeperClient', () => {
         expect(() => new KeeperClient(invalidConfig)).toThrow(ConnectorError)
     })
 
+    it('defaults pollTimeoutSeconds to 60 when omitted', () => {
+        const clientWithDefault = new KeeperClient(mockConfig)
+        expect((clientWithDefault as any).pollTimeoutMs).toBe(60_000)
+    })
+
+    it('uses pollTimeoutSeconds from config', () => {
+        const clientWithTimeout = new KeeperClient({
+            ...mockConfig,
+            pollTimeoutSeconds: '90',
+        })
+        expect((clientWithTimeout as any).pollTimeoutMs).toBe(90_000)
+    })
+
+    it('falls back to 60 seconds for invalid pollTimeoutSeconds', () => {
+        const clientWithInvalidTimeout = new KeeperClient({
+            ...mockConfig,
+            pollTimeoutSeconds: 'abc',
+        })
+        expect((clientWithInvalidTimeout as any).pollTimeoutMs).toBe(60_000)
+    })
+
     it('testConnection submits this-device and polls until success', async () => {
         mockAcceptedSubmit('req-123')
         mockedAxios.get
