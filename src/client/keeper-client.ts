@@ -2,8 +2,14 @@ import { ConnectorError } from '@sailpoint/connector-sdk'
 import axios from 'axios'
 import { RequestResultResponse, SubmitRequestResponse } from '../model/service-mode-api'
 import { SourceConfig } from '../model/config'
+import { KeeperNode, KeeperRole, KeeperTeam, KeeperUser } from '../model/keeper-entities'
 import { handleAPIErrorResponse } from '../utils/api-error'
 import { requireConfigValue } from '../utils/errors'
+
+const USER_COLUMNS = 'name,status,transfer_status,node,team_count,teams,role_count,roles,alias,2fa_enabled,job_title'
+const TEAM_COLUMNS = 'restricts,node,user_count,users,queued_user_count,queued_users,role_count,roles'
+const ROLE_COLUMNS = 'visible_below,default_role,admin,node,user_count,users,team_count,teams'
+const NODE_COLUMNS = 'parent_node,parent_id,user_count,users,team_count,teams,role_count,roles,provisioning,isolated'
 
 const DEFAULT_POLL_TIMEOUT_SECONDS = 60
 const INITIAL_POLL_DELAY_MS = 500
@@ -113,5 +119,70 @@ export class KeeperClient {
     async testConnection(): Promise<Record<string, never>> {
         await this.executeCommand('this-device')
         return {}
+    }
+
+    async listUsers(): Promise<KeeperUser[]> {
+        const result = await this.executeCommand(
+            `enterprise-info --users --format json -v --columns ${USER_COLUMNS}`
+        )
+        return this.parseArrayData<KeeperUser>(result.data, 'users')
+    }
+
+    async listTeams(): Promise<KeeperTeam[]> {
+        const result = await this.executeCommand(
+            `enterprise-info --teams --format json -v --columns ${TEAM_COLUMNS}`
+        )
+        return this.parseArrayData<KeeperTeam>(result.data, 'teams')
+    }
+
+    async listRoles(): Promise<KeeperRole[]> {
+        const result = await this.executeCommand(
+            `enterprise-info --roles --format json -v --columns ${ROLE_COLUMNS}`
+        )
+        return this.parseArrayData<KeeperRole>(result.data, 'roles')
+    }
+
+    async listNodes(): Promise<KeeperNode[]> {
+        const result = await this.executeCommand(
+            `enterprise-info --nodes --format json -v --columns ${NODE_COLUMNS}`
+        )
+        return this.parseArrayData<KeeperNode>(result.data, 'nodes')
+    }
+
+    /**
+     * Commander's Service Mode returns command output either as a parsed JSON array
+     * (queue-mode v2) or as a raw stdout string that must be parsed. Handle both.
+     */
+    private parseArrayData<T>(data: unknown, kind: string): T[] {
+        if (Array.isArray(data)) {
+            return data as T[]
+        }
+
+        if (typeof data === 'string') {
+            const trimmed = data.trim()
+            if (trimmed === '') {
+                return []
+            }
+            try {
+                const parsed = JSON.parse(trimmed)
+                if (Array.isArray(parsed)) {
+                    return parsed as T[]
+                }
+                throw new ConnectorError(
+                    `Keeper ${kind} response parsed but is not an array (got ${typeof parsed})`
+                )
+            } catch (err) {
+                if (err instanceof ConnectorError) {
+                    throw err
+                }
+                throw new ConnectorError(`Failed to parse Keeper ${kind} response as JSON: ${(err as Error).message}`)
+            }
+        }
+
+        if (data == null) {
+            return []
+        }
+
+        throw new ConnectorError(`Unexpected Keeper ${kind} response type: ${typeof data}`)
     }
 }

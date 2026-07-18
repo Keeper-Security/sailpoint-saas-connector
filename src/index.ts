@@ -1,5 +1,7 @@
 import { createConnector, readConfig } from '@sailpoint/connector-sdk'
 import { KeeperClient } from './client/keeper-client'
+import { createAccountListHandler } from './handlers/account-list'
+import { createEntitlementListHandler } from './handlers/entitlement-list'
 import { createTestConnectionHandler } from './handlers/test-connection'
 import { SourceConfig } from './model/config'
 
@@ -8,5 +10,8 @@ export const connector = async () => {
     const config = (await readConfig()) as SourceConfig
     const client = new KeeperClient(config)
 
-    return createConnector().stdTestConnection(createTestConnectionHandler(client))
+    return createConnector()
+        .stdTestConnection(createTestConnectionHandler(client))
+        .stdEntitlementList(createEntitlementListHandler(client))
+        .stdAccountList(createAccountListHandler(client))
 }
