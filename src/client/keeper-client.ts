@@ -128,6 +128,29 @@ export class KeeperClient {
         return this.parseArrayData<KeeperUser>(result.data, 'users')
     }
 
+    /**
+     * Fetch a single Keeper user by email. Returns `null` if Commander reports no match
+     * so callers can decide whether to raise a "not found" error.
+     */
+    async getUser(email: string): Promise<KeeperUser | null> {
+        const trimmed = email?.trim()
+        if (!trimmed) {
+            throw new ConnectorError('getUser called with empty email')
+        }
+
+        // enterprise-info accepts a positional pattern; wrap in quotes and escape any
+        // embedded quote to keep the Commander argparse-style parser happy.
+        const safe = trimmed.replace(/"/g, '\\"')
+        const result = await this.executeCommand(
+            `enterprise-info "${safe}" --users --format json -v --columns ${USER_COLUMNS}`
+        )
+        const users = this.parseArrayData<KeeperUser>(result.data, 'users')
+
+        // Commander pattern is a substring/glob match, so filter to an exact email hit.
+        const match = users.find((u) => u?.email?.toLowerCase() === trimmed.toLowerCase())
+        return match ?? null
+    }
+
     async listTeams(): Promise<KeeperTeam[]> {
         const result = await this.executeCommand(
             `enterprise-info --teams --format json -v --columns ${TEAM_COLUMNS}`
