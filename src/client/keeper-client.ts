@@ -54,7 +54,35 @@ export class KeeperClient {
         }
     }
 
-    private async executeCommand(command: string): Promise<RequestResultResponse> {
+    /**
+     * Run a Commander command via the async execute + poll pipeline.
+     *
+     * By default we refresh both Commander caches before running the payload
+     * so read commands never operate on stale local data:
+     *   - `sync-down -f`       refreshes the vault cache (records, shared folders)
+     *   - `enterprise-down -f` refreshes the enterprise cache (users, teams,
+     *                          roles, nodes, node hierarchy)
+     *
+     * The refreshes run sequentially — enterprise-down only fires if
+     * sync-down succeeded, which keeps error handling and log ordering
+     * predictable at the cost of ~1 extra refresh worth of latency.
+     *
+     * Callers that only need connectivity/auth checks (e.g. test-connection)
+     * can opt out via `{ syncFirst: false }`.
+     */
+    private async executeCommand(
+        command: string,
+        options: { syncFirst?: boolean } = {}
+    ): Promise<RequestResultResponse> {
+        const syncFirst = options.syncFirst ?? true
+        if (syncFirst) {
+            await this.runCommand('sync-down -f')
+            await this.runCommand('enterprise-down -f')
+        }
+        return this.runCommand(command)
+    }
+
+    private async runCommand(command: string): Promise<RequestResultResponse> {
         const requestId = await this.submitRequest(command)
         return this.pollRequestResult(requestId)
     }
@@ -117,14 +145,14 @@ export class KeeperClient {
     }
 
     async testConnection(): Promise<Record<string, never>> {
-        await this.executeCommand('this-device')
+        // Test connection is a lightweight auth/connectivity ping, so skip the
+        // pre-command sync-down to keep it fast and independent of vault state.
+        await this.executeCommand('this-device', { syncFirst: false })
         return {}
     }
 
     async listUsers(): Promise<KeeperUser[]> {
-        const result = await this.executeCommand(
-            `enterprise-info --users --format json -v --columns ${USER_COLUMNS}`
-        )
+        const result = await this.executeCommand(`enterprise-info --users --format json -v --columns ${USER_COLUMNS}`)
         return this.parseArrayData<KeeperUser>(result.data, 'users')
     }
 
@@ -152,23 +180,17 @@ export class KeeperClient {
     }
 
     async listTeams(): Promise<KeeperTeam[]> {
-        const result = await this.executeCommand(
-            `enterprise-info --teams --format json -v --columns ${TEAM_COLUMNS}`
-        )
+        const result = await this.executeCommand(`enterprise-info --teams --format json -v --columns ${TEAM_COLUMNS}`)
         return this.parseArrayData<KeeperTeam>(result.data, 'teams')
     }
 
     async listRoles(): Promise<KeeperRole[]> {
-        const result = await this.executeCommand(
-            `enterprise-info --roles --format json -v --columns ${ROLE_COLUMNS}`
-        )
+        const result = await this.executeCommand(`enterprise-info --roles --format json -v --columns ${ROLE_COLUMNS}`)
         return this.parseArrayData<KeeperRole>(result.data, 'roles')
     }
 
     async listNodes(): Promise<KeeperNode[]> {
-        const result = await this.executeCommand(
-            `enterprise-info --nodes --format json -v --columns ${NODE_COLUMNS}`
-        )
+        const result = await this.executeCommand(`enterprise-info --nodes --format json -v --columns ${NODE_COLUMNS}`)
         return this.parseArrayData<KeeperNode>(result.data, 'nodes')
     }
 
@@ -191,9 +213,7 @@ export class KeeperClient {
                 if (Array.isArray(parsed)) {
                     return parsed as T[]
                 }
-                throw new ConnectorError(
-                    `Keeper ${kind} response parsed but is not an array (got ${typeof parsed})`
-                )
+                throw new ConnectorError(`Keeper ${kind} response parsed but is not an array (got ${typeof parsed})`)
             } catch (err) {
                 if (err instanceof ConnectorError) {
                     throw err
