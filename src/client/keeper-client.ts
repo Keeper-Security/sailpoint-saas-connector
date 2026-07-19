@@ -161,14 +161,9 @@ export class KeeperClient {
      * so callers can decide whether to raise a "not found" error.
      */
     async getUser(email: string): Promise<KeeperUser | null> {
-        const trimmed = email?.trim()
-        if (!trimmed) {
-            throw new ConnectorError('getUser called with empty email')
-        }
+        const { trimmed, safe } = this.normalizeEmailArg(email, 'getUser')
 
-        // enterprise-info accepts a positional pattern; wrap in quotes and escape any
-        // embedded quote to keep the Commander argparse-style parser happy.
-        const safe = trimmed.replace(/"/g, '\\"')
+        // enterprise-info accepts a positional pattern; use the escaped form.
         const result = await this.executeCommand(
             `enterprise-info "${safe}" --users --format json -v --columns ${USER_COLUMNS}`
         )
@@ -177,6 +172,42 @@ export class KeeperClient {
         // Commander pattern is a substring/glob match, so filter to an exact email hit.
         const match = users.find((u) => u?.email?.toLowerCase() === trimmed.toLowerCase())
         return match ?? null
+    }
+
+    /**
+     * Lock a Keeper enterprise user. The user's status becomes "Locked" and they
+     * can no longer sign in until unlocked.
+     */
+    async lockUser(email: string): Promise<void> {
+        const { safe } = this.normalizeEmailArg(email, 'lockUser')
+        await this.executeCommand(`enterprise-user "${safe}" --lock`)
+    }
+
+    /**
+     * Unlock a previously-locked Keeper enterprise user. Restores their ability
+     * to sign in; their status returns to "Active".
+     */
+    async unlockUser(email: string): Promise<void> {
+        const { safe } = this.normalizeEmailArg(email, 'unlockUser')
+        await this.executeCommand(`enterprise-user "${safe}" --unlock`)
+    }
+
+    /**
+     * Trim, validate and shell-escape an email argument used as a positional
+     * argument in Commander commands.
+     *
+     * Returns both forms:
+     * - `trimmed`: cleaned value for comparisons / logging (still contains any
+     *              literal quotes the user may have supplied).
+     * - `safe`:    quote-escaped form suitable for interpolation into a
+     *              Commander command string.
+     */
+    private normalizeEmailArg(email: string, methodName: string): { trimmed: string; safe: string } {
+        const trimmed = email?.trim()
+        if (!trimmed) {
+            throw new ConnectorError(`${methodName} called with empty email`)
+        }
+        return { trimmed, safe: trimmed.replace(/"/g, '\\"') }
     }
 
     async listTeams(): Promise<KeeperTeam[]> {
