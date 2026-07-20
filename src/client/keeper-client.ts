@@ -26,8 +26,6 @@ export interface CreateUserOptions {
     name?: string
     jobTitle?: string
     nodeId?: string
-    roleIds?: string[]
-    teamUids?: string[]
 }
 
 function sleep(ms: number): Promise<void> {
@@ -230,13 +228,6 @@ export class KeeperClient {
         if (options.name) parts.push(`--name "${this.escapeArg(options.name)}"`)
         if (options.jobTitle) parts.push(`--job-title "${this.escapeArg(options.jobTitle)}"`)
         if (options.nodeId) parts.push(`--node "${this.escapeArg(options.nodeId)}"`)
-
-        for (const roleId of options.roleIds ?? []) {
-            if (roleId) parts.push(`--add-role "${this.escapeArg(roleId)}"`)
-        }
-        for (const teamUid of options.teamUids ?? []) {
-            if (teamUid) parts.push(`--add-team "${this.escapeArg(teamUid)}"`)
-        }
 
         await this.executeCommand(parts.join(' '))
     }
