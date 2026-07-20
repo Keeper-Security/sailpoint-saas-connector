@@ -59,12 +59,14 @@
 			{
 				"name": "email",
 				"type": "string",
-				"description": "Primary email address; used as the account identifier"
+				"description": "Primary email address; used as the account identifier",
+				"required": true
 			},
 			{
 				"name": "name",
 				"type": "string",
-				"description": "Full name as stored in Keeper"
+				"description": "Full name as stored in Keeper",
+				"required": true
 			},
 			{
 				"name": "status",
@@ -95,10 +97,11 @@
 			{
 				"name": "node",
 				"type": "string",
-				"description": "Enterprise node the user belongs to (single-valued entitlement)",
+				"description": "Enterprise node the user belongs to (single-valued entitlement). Required on create because Keeper enterprise users must be placed in a node.",
 				"entitlement": true,
 				"managed": true,
 				"multi": false,
+				"required": true,
 				"schemaObjectType": "node"
 			},
 			{

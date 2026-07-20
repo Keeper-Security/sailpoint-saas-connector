@@ -15,6 +15,21 @@ const DEFAULT_POLL_TIMEOUT_SECONDS = 60
 const INITIAL_POLL_DELAY_MS = 500
 const MAX_POLL_DELAY_MS = 5_000
 
+/**
+ * Inputs for `KeeperClient.createUser`. Only `email` is required — every other
+ * field is optional and will be omitted from the underlying Commander call if
+ * left blank. `roleIds` and `teamUids` accept the stable IDs we hand out in
+ * entitlement:list responses (role_id / team_uid).
+ */
+export interface CreateUserOptions {
+    email: string
+    name?: string
+    jobTitle?: string
+    nodeId?: string
+    roleIds?: string[]
+    teamUids?: string[]
+}
+
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -193,6 +208,40 @@ export class KeeperClient {
     }
 
     /**
+     * Invite a new Keeper enterprise user and optionally seed their initial
+     * attributes and entitlement memberships. Commander sends an invitation
+     * email; the user's status is "Invited" until they accept and set up a
+     * vault, at which point it becomes "Active".
+     *
+     * Commander's `enterprise-user --add` accepts `--add-role` and `--add-team`
+     * (repeatable) so we can create + assign initial memberships atomically in
+     * a single command. Both flags accept the entity's name or its stable ID
+     * (role_id / team_uid) — we always pass IDs since that's what ISC hands us
+     * in `attributes.roles` / `attributes.teams`.
+     *
+     * Only `email` is required. Any option left blank/undefined is simply
+     * omitted from the command so Commander uses its defaults.
+     */
+    async createUser(options: CreateUserOptions): Promise<void> {
+        const { safe: safeEmail } = this.normalizeEmailArg(options.email, 'createUser')
+
+        const parts: string[] = [`enterprise-user "${safeEmail}" --add`]
+
+        if (options.name) parts.push(`--name "${this.escapeArg(options.name)}"`)
+        if (options.jobTitle) parts.push(`--job-title "${this.escapeArg(options.jobTitle)}"`)
+        if (options.nodeId) parts.push(`--node "${this.escapeArg(options.nodeId)}"`)
+
+        for (const roleId of options.roleIds ?? []) {
+            if (roleId) parts.push(`--add-role "${this.escapeArg(roleId)}"`)
+        }
+        for (const teamUid of options.teamUids ?? []) {
+            if (teamUid) parts.push(`--add-team "${this.escapeArg(teamUid)}"`)
+        }
+
+        await this.executeCommand(parts.join(' '))
+    }
+
+    /**
      * Trim, validate and shell-escape an email argument used as a positional
      * argument in Commander commands.
      *
@@ -207,7 +256,16 @@ export class KeeperClient {
         if (!trimmed) {
             throw new ConnectorError(`${methodName} called with empty email`)
         }
-        return { trimmed, safe: trimmed.replace(/"/g, '\\"') }
+        return { trimmed, safe: this.escapeArg(trimmed) }
+    }
+
+    /**
+     * Escape double quotes inside an argument value so Commander's argparse
+     * parser doesn't split the string. Values are wrapped in `"..."` at the
+     * call site; this ensures embedded quotes don't terminate that wrap.
+     */
+    private escapeArg(value: string): string {
+        return value.replace(/"/g, '\\"')
     }
 
     async listTeams(): Promise<KeeperTeam[]> {
