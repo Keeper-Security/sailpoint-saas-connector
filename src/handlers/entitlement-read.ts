@@ -1,0 +1,99 @@
+import {
+    ConnectorError,
+    ConnectorErrorType,
+    Context,
+    KeyID,
+    logger,
+    Response,
+    StdEntitlementReadInput,
+    StdEntitlementReadOutput,
+} from '@sailpoint/connector-sdk'
+import { KeeperClient } from '../client/keeper-client'
+import {
+    buildNodePathMap,
+    toNodeEntitlement,
+    toRoleEntitlement,
+    toTeamEntitlement,
+} from '../utils/keeper-mappings'
+
+const SUPPORTED_TYPES = ['node', 'team', 'role'] as const
+
+export function createEntitlementReadHandler(client: KeeperClient) {
+    return async (
+        _context: Context,
+        input: StdEntitlementReadInput,
+        res: Response<StdEntitlementReadOutput>
+    ): Promise<void> => {
+        const type = input?.type
+        // `key.simple.id` holds the strict identityAttribute value from the schema;
+        // `input.identity` may be set to the displayAttribute value in some tools.
+        // Prefer the key and fall back to `identity` so both ISC and local test
+        // harnesses (spcx / Postman) work reliably.
+        const identity = safeKeyId(input) ?? input?.identity
+        if (!identity) {
+            throw new ConnectorError(
+                `std:entitlement:read called without an identity (type: ${type ?? 'unknown'})`
+            )
+        }
+
+        logger.info(`Reading Keeper ${type} entitlement ${identity}`)
+
+        switch (type) {
+            case 'node': {
+                // Nodes' full path is derived from the whole tree, so we still need the
+                // full node list to reconstruct the same view we emit during list.
+                const nodes = await client.listNodes()
+                const node = nodes.find((n) => String(n.node_id) === identity)
+                if (!node) {
+                    throw new ConnectorError(
+                        `Keeper node with id "${identity}" not found`,
+                        ConnectorErrorType.NotFound
+                    )
+                }
+                res.send(toNodeEntitlement(node))
+                return
+            }
+
+            case 'team': {
+                const [teams, nodes] = await Promise.all([client.listTeams(), client.listNodes()])
+                const team = teams.find((t) => t.team_uid === identity)
+                if (!team) {
+                    throw new ConnectorError(
+                        `Keeper team with uid "${identity}" not found`,
+                        ConnectorErrorType.NotFound
+                    )
+                }
+                res.send(toTeamEntitlement(team, buildNodePathMap(nodes)))
+                return
+            }
+
+            case 'role': {
+                const [roles, nodes] = await Promise.all([client.listRoles(), client.listNodes()])
+                const role = roles.find((r) => String(r.role_id) === identity)
+                if (!role) {
+                    throw new ConnectorError(
+                        `Keeper role with id "${identity}" not found`,
+                        ConnectorErrorType.NotFound
+                    )
+                }
+                res.send(toRoleEntitlement(role, buildNodePathMap(nodes)))
+                return
+            }
+
+            default:
+                throw new ConnectorError(
+                    `Unsupported entitlement type "${type}"; expected one of: ${SUPPORTED_TYPES.join(', ')}`
+                )
+        }
+    }
+}
+
+/** Returns the key's simple id if present, else null. KeyID throws on missing keys. */
+function safeKeyId(input: StdEntitlementReadInput): string | null {
+    if (!input?.key) return null
+    try {
+        return KeyID({ key: input.key })
+    } catch {
+        return null
+    }
+}
