@@ -23,9 +23,7 @@ export function createAccountCreateHandler(client: KeeperClient) {
         // value at create time). We accept either.
         const email = normalizeString(attrs.email) ?? normalizeString(input?.identity)
         if (!email) {
-            throw new ConnectorError(
-                'std:account:create requires an email in attributes.email or input.identity'
-            )
+            throw new ConnectorError('std:account:create requires an email in attributes.email or input.identity')
         }
 
         // `name` and `node` are declared required in connector-spec.json (ISC
@@ -35,8 +33,7 @@ export function createAccountCreateHandler(client: KeeperClient) {
         const name = normalizeString(attrs.name)
         if (!name) {
             throw new ConnectorError(
-                `std:account:create for "${email}" is missing required attribute "name" ` +
-                    `(the user's display name).`
+                `std:account:create for "${email}" is missing required attribute "name" ` + `(the user's display name).`
             )
         }
 
@@ -57,14 +54,11 @@ export function createAccountCreateHandler(client: KeeperClient) {
             name,
             jobTitle: normalizeString(attrs.jobTitle),
             nodeId,
-            roleIds: normalizeStringArray(attrs.roles),
-            teamUids: normalizeStringArray(attrs.teams),
         }
 
         logger.info(
-            `Creating Keeper vault account ${email} ` +
-                `(node=${createOptions.nodeId ?? '-'}, roles=${createOptions.roleIds?.length ?? 0}, ` +
-                `teams=${createOptions.teamUids?.length ?? 0})`
+            `Creating Keeper vault account for "${email}" ` +
+                `(name=${createOptions.name ?? '-'}), in node "${createOptions.nodeId ?? '-'}"`
         )
         await client.createUser(createOptions)
 
@@ -105,8 +99,6 @@ function normalizeString(value: unknown): string | undefined {
 function normalizeStringArray(value: unknown): string[] | undefined {
     if (value == null) return undefined
     const raw: unknown[] = Array.isArray(value) ? value : [value]
-    const result = raw
-        .map((v) => (typeof v === 'string' ? v.trim() : ''))
-        .filter((v) => v !== '')
+    const result = raw.map((v) => (typeof v === 'string' ? v.trim() : '')).filter((v) => v !== '')
     return result.length === 0 ? undefined : result
 }
