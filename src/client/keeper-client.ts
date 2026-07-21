@@ -28,6 +28,28 @@ export interface CreateUserOptions {
     nodeId?: string
 }
 
+/**
+ * Inputs for `KeeperClient.updateUser`. Every attribute field is optional and
+ * only emitted if the caller sets it. The distinction between `undefined`
+ * (attribute untouched) and `''` (attribute cleared) matters for `jobTitle`,
+ * which Commander clears when passed an empty value — so callers use
+ * `!== undefined` semantics, not truthiness.
+ *
+ * `addRoleValues` / `removeRoleValues` / `addTeamValues` / `removeTeamValues`
+ * are the pre-computed membership deltas. Each entry may be either a stable
+ * ID (role_id / team_uid) or a display name — Commander accepts both.
+ */
+export interface UpdateUserOptions {
+    email: string
+    name?: string
+    jobTitle?: string
+    nodeId?: string
+    addRoleValues?: string[]
+    removeRoleValues?: string[]
+    addTeamValues?: string[]
+    removeTeamValues?: string[]
+}
+
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -228,6 +250,39 @@ export class KeeperClient {
         if (options.name) parts.push(`--name "${this.escapeArg(options.name)}"`)
         if (options.jobTitle) parts.push(`--job-title "${this.escapeArg(options.jobTitle)}"`)
         if (options.nodeId) parts.push(`--node "${this.escapeArg(options.nodeId)}"`)
+
+        await this.executeCommand(parts.join(' '))
+    }
+
+    /**
+     * Apply an update to an existing Keeper enterprise user. Every option is
+     * optional and only fields the caller has set are emitted as Commander
+     * flags. Multiple flags are batched into a single `enterprise-user "<email>"`
+     * invocation so the update is applied atomically from Commander's point
+     * of view.
+     *
+     * Ordering: `--remove-*` flags are emitted before `--add-*` flags to
+     * reduce the chance of Commander rejecting an add for a membership the
+     * user already has (e.g. during a Set-diff where we happen to re-add an
+     * unrelated membership Commander would otherwise consider a duplicate).
+     */
+    async updateUser(options: UpdateUserOptions): Promise<void> {
+        const { safe: safeEmail } = this.normalizeEmailArg(options.email, 'updateUser')
+
+        const parts: string[] = [`enterprise-user "${safeEmail}" -f`]
+
+        if (options.name !== undefined) parts.push(`--name "${this.escapeArg(options.name)}"`)
+        if (options.jobTitle !== undefined) parts.push(`--job-title "${this.escapeArg(options.jobTitle)}"`)
+        if (options.nodeId !== undefined) parts.push(`--node "${this.escapeArg(options.nodeId)}"`)
+
+        for (const v of options.removeRoleValues ?? []) parts.push(`--remove-role "${this.escapeArg(v)}"`)
+        for (const v of options.removeTeamValues ?? []) parts.push(`--remove-team "${this.escapeArg(v)}"`)
+        for (const v of options.addRoleValues ?? []) parts.push(`--add-role "${this.escapeArg(v)}"`)
+        for (const v of options.addTeamValues ?? []) parts.push(`--add-team "${this.escapeArg(v)}"`)
+
+        if (parts.length === 1) {
+            throw new ConnectorError('updateUser called with no attributes to change')
+        }
 
         await this.executeCommand(parts.join(' '))
     }
