@@ -71,3 +71,10 @@ export interface KeeperNode {
     isolated?: boolean
     provisioning?: unknown
 }
+
+export interface KeeperRecord {
+    record_uid: string
+    title: string
+    record_category: string
+    type: string
+}

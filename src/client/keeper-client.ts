@@ -2,7 +2,7 @@ import { ConnectorError } from '@sailpoint/connector-sdk'
 import axios from 'axios'
 import { RequestResultResponse, SubmitRequestResponse } from '../model/service-mode-api'
 import { SourceConfig } from '../model/config'
-import { KeeperNode, KeeperRole, KeeperTeam, KeeperUser } from '../model/keeper-entities'
+import { KeeperNode, KeeperRole, KeeperTeam, KeeperUser, KeeperRecord } from '../model/keeper-entities'
 import { handleAPIErrorResponse } from '../utils/api-error'
 import { requireConfigValue } from '../utils/errors'
 
@@ -281,6 +281,11 @@ export class KeeperClient {
     async listNodes(): Promise<KeeperNode[]> {
         const result = await this.executeCommand(`enterprise-info --nodes --format json -v --columns ${NODE_COLUMNS}`)
         return this.parseArrayData<KeeperNode>(result.data, 'nodes')
+    }
+
+    async listRecords(): Promise<KeeperRecord[]> {
+        const result = await this.executeCommand(`list --format json`)
+        return this.parseArrayData<KeeperRecord>(result.data, 'records')
     }
 
     /**
