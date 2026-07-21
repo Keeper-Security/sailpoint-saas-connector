@@ -8,7 +8,7 @@ import {
     StdAccountCreateOutput,
 } from '@sailpoint/connector-sdk'
 import { CreateUserOptions, KeeperClient } from '../client/keeper-client'
-import { buildIdMaps, toAccount } from '../utils/keeper-mappings'
+import { buildFolderMaps, buildIdMaps, toAccount } from '../utils/keeper-mappings'
 
 export function createAccountCreateHandler(client: KeeperClient) {
     return async (
@@ -65,11 +65,12 @@ export function createAccountCreateHandler(client: KeeperClient) {
         // Fetch the fresh user + catalogs so ISC's stored account view matches
         // Keeper's post-invite state (status will be "Invited" until the user
         // accepts the email and sets up their vault).
-        const [user, nodes, teams, roles] = await Promise.all([
+        const [user, nodes, teams, roles, folders] = await Promise.all([
             client.getUser(email),
             client.listNodes(),
             client.listTeams(),
             client.listRoles(),
+            client.listAllFolders(),
         ])
 
         if (!user) {
@@ -80,7 +81,11 @@ export function createAccountCreateHandler(client: KeeperClient) {
             )
         }
 
-        res.send(toAccount(user, buildIdMaps(nodes, teams, roles)))
+        const maps = {
+            ...buildIdMaps(nodes, teams, roles),
+            ...buildFolderMaps(folders, teams),
+        }
+        res.send(toAccount(user, maps))
     }
 }
 

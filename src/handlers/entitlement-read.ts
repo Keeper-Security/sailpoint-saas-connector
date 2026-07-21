@@ -10,13 +10,15 @@ import {
 } from '@sailpoint/connector-sdk'
 import { KeeperClient } from '../client/keeper-client'
 import {
+    buildFolderMaps,
     buildNodePathMap,
+    toFolderEntitlement,
     toNodeEntitlement,
     toRoleEntitlement,
     toTeamEntitlement,
 } from '../utils/keeper-mappings'
 
-const SUPPORTED_TYPES = ['node', 'team', 'role'] as const
+const SUPPORTED_TYPES = ['node', 'team', 'role', 'folder'] as const
 
 export function createEntitlementReadHandler(client: KeeperClient) {
     return async (
@@ -55,7 +57,11 @@ export function createEntitlementReadHandler(client: KeeperClient) {
             }
 
             case 'team': {
-                const [teams, nodes] = await Promise.all([client.listTeams(), client.listNodes()])
+                const [teams, nodes, folders] = await Promise.all([
+                    client.listTeams(),
+                    client.listNodes(),
+                    client.listAllFolders(),
+                ])
                 const team = teams.find((t) => t.team_uid === identity)
                 if (!team) {
                     throw new ConnectorError(
@@ -63,7 +69,14 @@ export function createEntitlementReadHandler(client: KeeperClient) {
                         ConnectorErrorType.NotFound
                     )
                 }
-                res.send(toTeamEntitlement(team, buildNodePathMap(nodes)))
+                const { teamUidToFolderIds } = buildFolderMaps(folders, teams)
+                res.send(
+                    toTeamEntitlement(
+                        team,
+                        buildNodePathMap(nodes),
+                        teamUidToFolderIds.get(team.team_uid) ?? []
+                    )
+                )
                 return
             }
 
@@ -77,6 +90,19 @@ export function createEntitlementReadHandler(client: KeeperClient) {
                     )
                 }
                 res.send(toRoleEntitlement(role, buildNodePathMap(nodes)))
+                return
+            }
+
+            case 'folder': {
+                const folders = await client.listAllFolders()
+                const folder = folders.find((f) => f.uid === identity)
+                if (!folder) {
+                    throw new ConnectorError(
+                        `Keeper folder with id "${identity}" not found`,
+                        ConnectorErrorType.NotFound
+                    )
+                }
+                res.send(toFolderEntitlement(folder))
                 return
             }
 

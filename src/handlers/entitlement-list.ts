@@ -8,13 +8,15 @@ import {
 } from '@sailpoint/connector-sdk'
 import { KeeperClient } from '../client/keeper-client'
 import {
+    buildFolderMaps,
     buildNodePathMap,
+    toFolderEntitlement,
     toNodeEntitlement,
     toRoleEntitlement,
     toTeamEntitlement,
 } from '../utils/keeper-mappings'
 
-const SUPPORTED_TYPES = ['node', 'team', 'role'] as const
+const SUPPORTED_TYPES = ['node', 'team', 'role', 'folder'] as const
 
 export function createEntitlementListHandler(client: KeeperClient) {
     return async (
@@ -36,11 +38,18 @@ export function createEntitlementListHandler(client: KeeperClient) {
             }
 
             case 'team': {
-                const [teams, nodes] = await Promise.all([client.listTeams(), client.listNodes()])
+                const [teams, nodes, folders] = await Promise.all([
+                    client.listTeams(),
+                    client.listNodes(),
+                    client.listAllFolders(),
+                ])
                 const nodePathToId = buildNodePathMap(nodes)
+                const { teamUidToFolderIds } = buildFolderMaps(folders, teams)
                 logger.info(`Fetched ${teams.length} Keeper teams`)
                 for (const team of teams) {
-                    res.send(toTeamEntitlement(team, nodePathToId))
+                    res.send(
+                        toTeamEntitlement(team, nodePathToId, teamUidToFolderIds.get(team.team_uid) ?? [])
+                    )
                 }
                 return
             }
@@ -51,6 +60,15 @@ export function createEntitlementListHandler(client: KeeperClient) {
                 logger.info(`Fetched ${roles.length} Keeper roles`)
                 for (const role of roles) {
                     res.send(toRoleEntitlement(role, nodePathToId))
+                }
+                return
+            }
+            
+            case 'folder': {
+                const folders = await client.listAllFolders()
+                logger.info(`Fetched ${folders.length} Keeper folders`)
+                for (const folder of folders) {
+                    res.send(toFolderEntitlement(folder))
                 }
                 return
             }

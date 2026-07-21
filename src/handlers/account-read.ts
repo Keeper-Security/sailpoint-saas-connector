@@ -9,7 +9,7 @@ import {
     StdAccountReadOutput,
 } from '@sailpoint/connector-sdk'
 import { KeeperClient } from '../client/keeper-client'
-import { buildIdMaps, toAccount } from '../utils/keeper-mappings'
+import { buildFolderMaps, buildIdMaps, toAccount } from '../utils/keeper-mappings'
 
 export function createAccountReadHandler(client: KeeperClient) {
     return async (
@@ -29,11 +29,12 @@ export function createAccountReadHandler(client: KeeperClient) {
         // Fetch the user and the entitlement catalogs in parallel. The catalogs are
         // needed to translate Commander's name-based `teams`/`roles`/`node` values
         // on the user into stable IDs that match the entitlement schemas.
-        const [user, nodes, teams, roles] = await Promise.all([
+        const [user, nodes, teams, roles, folders] = await Promise.all([
             client.getUser(email),
             client.listNodes(),
             client.listTeams(),
             client.listRoles(),
+            client.listAllFolders(),
         ])
 
         if (!user) {
@@ -43,7 +44,10 @@ export function createAccountReadHandler(client: KeeperClient) {
             )
         }
 
-        const maps = buildIdMaps(nodes, teams, roles)
+        const maps = {
+            ...buildIdMaps(nodes, teams, roles),
+            ...buildFolderMaps(folders, teams),
+        }
         res.send(toAccount(user, maps))
     }
 }

@@ -71,3 +71,16 @@ export interface KeeperNode {
     isolated?: boolean
     provisioning?: unknown
 }
+
+export type KeeperFolderType = 'classic' | 'nsf'
+
+export interface KeeperFolder {
+    uid: string
+    name: string
+    path: string
+    folderType: KeeperFolderType
+    parentId?: string
+    /** Filled later when membership discovery exists */
+    users?: string[]
+    teams?: string[]
+}

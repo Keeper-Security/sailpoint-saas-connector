@@ -9,7 +9,7 @@ import {
     StdAccountEnableOutput,
 } from '@sailpoint/connector-sdk'
 import { KeeperClient } from '../client/keeper-client'
-import { buildIdMaps, toAccount } from '../utils/keeper-mappings'
+import { buildFolderMaps, buildIdMaps, toAccount } from '../utils/keeper-mappings'
 
 export function createAccountEnableHandler(client: KeeperClient) {
     return async (
@@ -28,11 +28,12 @@ export function createAccountEnableHandler(client: KeeperClient) {
         // Return the refreshed account view so ISC sees `disabled: false` and
         // the updated Keeper status (Active). Reuses the same catalog lookup
         // as account:list so entitlement joins stay intact.
-        const [user, nodes, teams, roles] = await Promise.all([
+        const [user, nodes, teams, roles, folders] = await Promise.all([
             client.getUser(email),
             client.listNodes(),
             client.listTeams(),
             client.listRoles(),
+            client.listAllFolders(),
         ])
 
         if (!user) {
@@ -42,7 +43,11 @@ export function createAccountEnableHandler(client: KeeperClient) {
             )
         }
 
-        res.send(toAccount(user, buildIdMaps(nodes, teams, roles)))
+        const maps = {
+            ...buildIdMaps(nodes, teams, roles),
+            ...buildFolderMaps(folders, teams),
+        }
+        res.send(toAccount(user, maps))
     }
 }
 
