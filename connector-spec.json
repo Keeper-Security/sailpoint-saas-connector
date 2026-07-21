@@ -1,5 +1,5 @@
 {
-	"name": "Keeper Security SK",
+	"name": "Keeper Security",
 	"commands": [
 		"std:account:list",
 		"std:account:read",
