@@ -121,6 +121,15 @@
 				"managed": true,
 				"multi": true,
 				"schemaObjectType": "role"
+			},
+			{
+				"name": "folders",
+				"type": "string",
+				"description": "Classic/NSF folders shared directly to this user.",
+				"entitlement": true,
+				"managed": true,
+				"multi": true,
+				"schemaObjectType": "folder"
 			}
 		]
 	},
@@ -191,6 +200,12 @@
 					"name": "restricts",
 					"type": "string",
 					"description": "Raw Keeper restrict flags (e.g. '  W S'); decoded attributes may be added later"
+				},
+				{
+					"name": "folders",
+					"type": "string",
+					"description": "Folder ids shared to this team.",
+					"multi": true
 				}
 			]
 		},
@@ -237,6 +252,38 @@
 			]
 		},
 		{
+			"type": "folder",
+			"displayAttribute": "path",
+			"identityAttribute": "id",
+			"attributes": [
+				{
+					"name": "id",
+					"type": "string",
+					"description": "Keeper folder UID (classic shared folder UID or NSF UID)"
+				},
+				{
+					"name": "name",
+					"type": "string",
+					"description": "Folder name"
+				},
+				{
+					"name": "path",
+					"type": "string",
+					"description": "Display path"
+				},
+				{
+					"name": "folderType",
+					"type": "string",
+					"description": "classic or nsf"
+				},
+				{
+					"name": "parentId",
+					"type": "string",
+					"description": "Parent folder UID (absent for vault root children)"
+				}
+			]
+		},
+		{
 			"type": "record",
 			"displayAttribute": "name",
 			"identityAttribute": "record_uid",
@@ -257,13 +304,11 @@
 					"description": "Record source (classic / nsf)"
 				},
 				{
-
 					"name": "type",
 					"type": "string",
 					"description": "Record type"
 				}
 			]
 		}
-
 	]
 }

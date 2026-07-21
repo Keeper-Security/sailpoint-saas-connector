@@ -1,5 +1,5 @@
 import { logger, StdAccountListOutput, StdEntitlementListOutput } from '@sailpoint/connector-sdk'
-import { KeeperNode, KeeperRecord, KeeperRole, KeeperTeam, KeeperUser } from '../model/keeper-entities'
+import { KeeperFolder, KeeperNode, KeeperRole, KeeperTeam, KeeperUser, KeeperRecord } from '../model/keeper-entities'
 
 export const KEEPER_NODE_PATH_SEPARATOR = '\\'
 
@@ -13,6 +13,10 @@ export interface KeeperIdMaps {
     teamNameToUid: Map<string, string>
     /** Role display name -> role_id (as string). */
     roleNameToId: Map<string, string>
+    /** lowercase email -> folder identities (direct shares) */
+    userEmailToFolderIds: Map<string, string[]>
+    /** team_uid -> folder identities */
+    teamUidToFolderIds: Map<string, string[]>
 }
 
 /**
@@ -52,7 +56,13 @@ export function buildIdMaps(nodes: KeeperNode[], teams: KeeperTeam[], roles: Kee
         registerFirstOrWarn(roleNameToId, role.name, String(role.role_id), 'role')
     }
 
-    return { nodePathToId, teamNameToUid, roleNameToId }
+    return {
+        nodePathToId,
+        teamNameToUid,
+        roleNameToId,
+        userEmailToFolderIds: new Map(),
+        teamUidToFolderIds: new Map(),
+    }
 }
 
 function registerFirstOrWarn(map: Map<string, string>, key: string, value: string, kind: string): void {
@@ -67,6 +77,44 @@ function registerFirstOrWarn(map: Map<string, string>, key: string, value: strin
                 `Consider making ${kind} names unique across nodes.`
         )
     }
+}
+
+export function buildFolderMaps(
+    folders: KeeperFolder[],
+    teams: KeeperTeam[]
+): Pick<KeeperIdMaps, 'userEmailToFolderIds' | 'teamUidToFolderIds'> {
+    const teamNameToUid = new Map<string, string>()
+    for (const t of teams) {
+        if (t.name && t.team_uid) teamNameToUid.set(t.name, t.team_uid)
+    }
+
+    const userEmailToFolderIds = new Map<string, string[]>()
+    const teamUidToFolderIds = new Map<string, string[]>()
+
+    const push = (map: Map<string, string[]>, key: string, folderId: string) => {
+        const list = map.get(key) ?? []
+        if (!list.includes(folderId)) list.push(folderId)
+        map.set(key, list)
+    }
+
+    for (const folder of folders) {
+        if (!folder.uid) continue
+        const folderId = folder.uid
+
+        for (const email of folder.users ?? []) {
+            const key = email.trim().toLowerCase()
+            if (key) push(userEmailToFolderIds, key, folderId)
+        }
+
+        for (const teamRef of folder.teams ?? []) {
+            const ref = teamRef.trim()
+            if (!ref) continue
+            const teamUid = teamNameToUid.get(ref) ?? ref // ref may already be uid
+            push(teamUidToFolderIds, teamUid, folderId)
+        }
+    }
+
+    return { userEmailToFolderIds, teamUidToFolderIds }
 }
 
 // -------------------- Commander -> SailPoint output --------------------
@@ -105,7 +153,11 @@ export function toRecordEntitlement(record: KeeperRecord): StdEntitlementListOut
     }
 }
 
-export function toTeamEntitlement(team: KeeperTeam, nodePathToId: Map<string, string>): StdEntitlementListOutput {
+export function toTeamEntitlement(
+    team: KeeperTeam,
+    nodePathToId: Map<string, string>,
+    folderIds: string[] = []
+): StdEntitlementListOutput {
     const nodePath = team.node ?? null
     const nodeId = nodePath ? nodePathToId.get(nodePath) ?? null : null
     return {
@@ -118,6 +170,7 @@ export function toTeamEntitlement(team: KeeperTeam, nodePathToId: Map<string, st
             nodeId,
             nodePath,
             restricts: team.restricts ?? '',
+            folders: folderIds,
         },
     }
 }
@@ -176,6 +229,23 @@ export function toAccount(user: KeeperUser, maps: KeeperIdMaps): StdAccountListO
             node: nodeId,
             teams: teamUids,
             roles: roleIds,
+            folders: maps.userEmailToFolderIds.get((user.email ?? '').toLowerCase()) ?? [],
+        },
+    }
+}
+
+export function toFolderEntitlement(folder: KeeperFolder): StdEntitlementListOutput {
+    const id = folder.uid
+    return {
+        identity: id,
+        uuid: id,
+        type: 'folder',
+        attributes: {
+            id,
+            name: folder.name ?? '',
+            path: folder.path || folder.name || id,
+            folderType: folder.folderType,
+            parentId: folder.parentId ?? null,
         },
     }
 }

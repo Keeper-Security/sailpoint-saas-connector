@@ -2,7 +2,7 @@ import { ConnectorError } from '@sailpoint/connector-sdk'
 import axios from 'axios'
 import { RequestResultResponse, SubmitRequestResponse } from '../model/service-mode-api'
 import { SourceConfig } from '../model/config'
-import { KeeperNode, KeeperRole, KeeperTeam, KeeperUser, KeeperRecord } from '../model/keeper-entities'
+import { KeeperNode, KeeperRole, KeeperTeam, KeeperUser, KeeperRecord, KeeperFolder } from '../model/keeper-entities'
 import { handleAPIErrorResponse } from '../utils/api-error'
 import { requireConfigValue } from '../utils/errors'
 
@@ -26,8 +26,28 @@ export interface CreateUserOptions {
     name?: string
     jobTitle?: string
     nodeId?: string
-    roleIds?: string[]
-    teamUids?: string[]
+}
+
+/**
+ * Inputs for `KeeperClient.updateUser`. Every attribute field is optional and
+ * only emitted if the caller sets it. The distinction between `undefined`
+ * (attribute untouched) and `''` (attribute cleared) matters for `jobTitle`,
+ * which Commander clears when passed an empty value — so callers use
+ * `!== undefined` semantics, not truthiness.
+ *
+ * `addRoleValues` / `removeRoleValues` / `addTeamValues` / `removeTeamValues`
+ * are the pre-computed membership deltas. Each entry may be either a stable
+ * ID (role_id / team_uid) or a display name — Commander accepts both.
+ */
+export interface UpdateUserOptions {
+    email: string
+    name?: string
+    jobTitle?: string
+    nodeId?: string
+    addRoleValues?: string[]
+    removeRoleValues?: string[]
+    addTeamValues?: string[]
+    removeTeamValues?: string[]
 }
 
 function sleep(ms: number): Promise<void> {
@@ -231,11 +251,37 @@ export class KeeperClient {
         if (options.jobTitle) parts.push(`--job-title "${this.escapeArg(options.jobTitle)}"`)
         if (options.nodeId) parts.push(`--node "${this.escapeArg(options.nodeId)}"`)
 
-        for (const roleId of options.roleIds ?? []) {
-            if (roleId) parts.push(`--add-role "${this.escapeArg(roleId)}"`)
-        }
-        for (const teamUid of options.teamUids ?? []) {
-            if (teamUid) parts.push(`--add-team "${this.escapeArg(teamUid)}"`)
+        await this.executeCommand(parts.join(' '))
+    }
+
+    /**
+     * Apply an update to an existing Keeper enterprise user. Every option is
+     * optional and only fields the caller has set are emitted as Commander
+     * flags. Multiple flags are batched into a single `enterprise-user "<email>"`
+     * invocation so the update is applied atomically from Commander's point
+     * of view.
+     *
+     * Ordering: `--remove-*` flags are emitted before `--add-*` flags to
+     * reduce the chance of Commander rejecting an add for a membership the
+     * user already has (e.g. during a Set-diff where we happen to re-add an
+     * unrelated membership Commander would otherwise consider a duplicate).
+     */
+    async updateUser(options: UpdateUserOptions): Promise<void> {
+        const { safe: safeEmail } = this.normalizeEmailArg(options.email, 'updateUser')
+
+        const parts: string[] = [`enterprise-user "${safeEmail}" -f`]
+
+        if (options.name !== undefined) parts.push(`--name "${this.escapeArg(options.name)}"`)
+        if (options.jobTitle !== undefined) parts.push(`--job-title "${this.escapeArg(options.jobTitle)}"`)
+        if (options.nodeId !== undefined) parts.push(`--node "${this.escapeArg(options.nodeId)}"`)
+
+        for (const v of options.removeRoleValues ?? []) parts.push(`--remove-role "${this.escapeArg(v)}"`)
+        for (const v of options.removeTeamValues ?? []) parts.push(`--remove-team "${this.escapeArg(v)}"`)
+        for (const v of options.addRoleValues ?? []) parts.push(`--add-role "${this.escapeArg(v)}"`)
+        for (const v of options.addTeamValues ?? []) parts.push(`--add-team "${this.escapeArg(v)}"`)
+
+        if (parts.length === 1) {
+            throw new ConnectorError('updateUser called with no attributes to change')
         }
 
         await this.executeCommand(parts.join(' '))
@@ -260,6 +306,86 @@ export class KeeperClient {
     }
 
     /**
+     * Map one row from `ls -f -R --format json` into KeeperFolder.
+     * Returns null for non-folder rows or unknown source values.
+     *
+     * Example row:
+     * {
+     *   "type": "folder",
+     *   "uid": "Oz2TFhU8DazlqKyf88zLiA",
+     *   "name": "DemoSailPoint",
+     *   "details": "Flags: , Parent: wvTib3HCfq0ErqalHQY_dw",
+     *   "source": "classic_folder"
+     * }
+     */
+    private mapLsFolder(row: Record<string, unknown>): KeeperFolder | null {
+        if (row.type !== 'folder') {
+            return null
+        }
+
+        const uid = String(row.uid ?? '').trim()
+        if (!uid) {
+            return null
+        }
+
+        const name = String(row.name ?? '')
+        const source = String(row.source ?? '')
+
+        let folderType: KeeperFolder['folderType'] | null = null
+        if (source === 'classic_folder') {
+            folderType = 'classic'
+        } else if (source === 'nested_share_folder') {
+            folderType = 'nsf'
+        } else {
+            return null
+        }
+
+        const details = String(row.details ?? '')
+        // details looks like: "Flags: S, Parent: /" or "Flags: , Parent: <uid>"
+        const parentMatch = details.match(/Parent:\s*(.+)$/i)
+        const parentRaw = parentMatch?.[1]?.trim() ?? ''
+        const parentId = !parentRaw || parentRaw === '/' ? undefined : parentRaw
+
+        return {
+            uid,
+            name,
+            path: name,
+            folderType,
+            parentId,
+        }
+    }
+
+    /**
+     * Build a display path from folder names by walking parentId links.
+     * Example: Freshservice Demo/DemoSailPoint
+     */
+    private buildFolderNamePath(
+        folder: KeeperFolder,
+        byUid: Map<string, KeeperFolder>
+    ): string {
+        const parts: string[] = []
+        let current: KeeperFolder | undefined = folder
+        const guard = new Set<string>()
+
+        while (current) {
+            if (guard.has(current.uid)) {
+                break
+            }
+            guard.add(current.uid)
+            parts.unshift(current.name || current.uid)
+
+            const parentId = current.parentId
+            if (!parentId) {
+                break
+            }
+
+            current = byUid.get(parentId)
+        }
+
+        return parts.join('/')
+    }
+
+    /**
      * Escape double quotes inside an argument value so Commander's argparse
      * parser doesn't split the string. Values are wrapped in `"..."` at the
      * call site; this ensures embedded quotes don't terminate that wrap.
@@ -281,6 +407,33 @@ export class KeeperClient {
     async listNodes(): Promise<KeeperNode[]> {
         const result = await this.executeCommand(`enterprise-info --nodes --format json -v --columns ${NODE_COLUMNS}`)
         return this.parseArrayData<KeeperNode>(result.data, 'nodes')
+    }
+    
+    /**
+     * List all vault folders (classic + NSF, including nested) via one recursive ls.
+     * Replaces list-sf + nsf-list for entitlement aggregation.
+     */
+    async listAllFolders(): Promise<KeeperFolder[]> {
+        const result = await this.executeCommand('ls -f -R --format json')
+        const rows = this.parseArrayData<Record<string, unknown>>(result.data, 'folders')
+
+        const folders: KeeperFolder[] = []
+        const seen = new Set<string>()
+
+        for (const row of rows) {
+            const folder = this.mapLsFolder(row)
+            if (!folder) continue
+            if (seen.has(folder.uid)) continue
+            seen.add(folder.uid)
+            folders.push(folder)
+        }
+
+        const byUid = new Map(folders.map((f) => [f.uid, f]))
+
+        return folders.map((f) => ({
+            ...f,
+            path: this.buildFolderNamePath(f, byUid),
+        }))
     }
 
     async listRecords(): Promise<KeeperRecord[]> {

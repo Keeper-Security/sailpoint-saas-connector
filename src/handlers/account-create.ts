@@ -8,7 +8,7 @@ import {
     StdAccountCreateOutput,
 } from '@sailpoint/connector-sdk'
 import { CreateUserOptions, KeeperClient } from '../client/keeper-client'
-import { buildIdMaps, toAccount } from '../utils/keeper-mappings'
+import { buildFolderMaps, buildIdMaps, toAccount } from '../utils/keeper-mappings'
 
 export function createAccountCreateHandler(client: KeeperClient) {
     return async (
@@ -23,9 +23,7 @@ export function createAccountCreateHandler(client: KeeperClient) {
         // value at create time). We accept either.
         const email = normalizeString(attrs.email) ?? normalizeString(input?.identity)
         if (!email) {
-            throw new ConnectorError(
-                'std:account:create requires an email in attributes.email or input.identity'
-            )
+            throw new ConnectorError('std:account:create requires an email in attributes.email or input.identity')
         }
 
         // `name` and `node` are declared required in connector-spec.json (ISC
@@ -35,8 +33,7 @@ export function createAccountCreateHandler(client: KeeperClient) {
         const name = normalizeString(attrs.name)
         if (!name) {
             throw new ConnectorError(
-                `std:account:create for "${email}" is missing required attribute "name" ` +
-                    `(the user's display name).`
+                `std:account:create for "${email}" is missing required attribute "name" ` + `(the user's display name).`
             )
         }
 
@@ -57,25 +54,23 @@ export function createAccountCreateHandler(client: KeeperClient) {
             name,
             jobTitle: normalizeString(attrs.jobTitle),
             nodeId,
-            roleIds: normalizeStringArray(attrs.roles),
-            teamUids: normalizeStringArray(attrs.teams),
         }
 
         logger.info(
-            `Creating Keeper vault account ${email} ` +
-                `(node=${createOptions.nodeId ?? '-'}, roles=${createOptions.roleIds?.length ?? 0}, ` +
-                `teams=${createOptions.teamUids?.length ?? 0})`
+            `Creating Keeper vault account for "${email}" ` +
+                `(name=${createOptions.name ?? '-'}), in node "${createOptions.nodeId ?? '-'}"`
         )
         await client.createUser(createOptions)
 
         // Fetch the fresh user + catalogs so ISC's stored account view matches
         // Keeper's post-invite state (status will be "Invited" until the user
         // accepts the email and sets up their vault).
-        const [user, nodes, teams, roles] = await Promise.all([
+        const [user, nodes, teams, roles, folders] = await Promise.all([
             client.getUser(email),
             client.listNodes(),
             client.listTeams(),
             client.listRoles(),
+            client.listAllFolders(),
         ])
 
         if (!user) {
@@ -86,7 +81,11 @@ export function createAccountCreateHandler(client: KeeperClient) {
             )
         }
 
-        res.send(toAccount(user, buildIdMaps(nodes, teams, roles)))
+        const maps = {
+            ...buildIdMaps(nodes, teams, roles),
+            ...buildFolderMaps(folders, teams),
+        }
+        res.send(toAccount(user, maps))
     }
 }
 
@@ -105,8 +104,6 @@ function normalizeString(value: unknown): string | undefined {
 function normalizeStringArray(value: unknown): string[] | undefined {
     if (value == null) return undefined
     const raw: unknown[] = Array.isArray(value) ? value : [value]
-    const result = raw
-        .map((v) => (typeof v === 'string' ? v.trim() : ''))
-        .filter((v) => v !== '')
+    const result = raw.map((v) => (typeof v === 'string' ? v.trim() : '')).filter((v) => v !== '')
     return result.length === 0 ? undefined : result
 }
