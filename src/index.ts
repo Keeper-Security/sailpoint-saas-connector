@@ -5,6 +5,7 @@ import { createAccountDisableHandler } from './handlers/account-disable'
 import { createAccountEnableHandler } from './handlers/account-enable'
 import { createAccountListHandler } from './handlers/account-list'
 import { createAccountReadHandler } from './handlers/account-read'
+import { createAccountUpdateHandler } from './handlers/account-update'
 import { createEntitlementListHandler } from './handlers/entitlement-list'
 import { createEntitlementReadHandler } from './handlers/entitlement-read'
 import { createTestConnectionHandler } from './handlers/test-connection'
@@ -22,6 +23,7 @@ export const connector = async () => {
         .stdAccountList(createAccountListHandler(client))
         .stdAccountRead(createAccountReadHandler(client))
         .stdAccountCreate(createAccountCreateHandler(client))
+        .stdAccountUpdate(createAccountUpdateHandler(client))
         .stdAccountDisable(createAccountDisableHandler(client))
         .stdAccountEnable(createAccountEnableHandler(client))
 }
