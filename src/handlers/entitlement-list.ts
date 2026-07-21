@@ -27,6 +27,10 @@ export function createEntitlementListHandler(client: KeeperClient) {
     ): Promise<void> => {
         const type = input.type
         logger.info(`Listing entitlements of type "${type}"`)
+        await client.syncVault()
+        logger.info('Synced vault while listing entitlements')
+        await client.syncEnterprise()
+        logger.info('Synced enterprise while listing entitlements')
 
         switch (type) {
             case 'node': {

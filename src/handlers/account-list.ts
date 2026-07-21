@@ -15,7 +15,10 @@ export function createAccountListHandler(client: KeeperClient) {
         res: Response<StdAccountListOutput>
     ): Promise<void> => {
         logger.info('Listing Keeper vault accounts')
-
+        await client.syncEnterprise()
+        logger.info('Synced enterprise')
+        await client.syncVault()
+        logger.info('Synced vault')
         // Aggregate the catalog first so we can translate names/paths to stable IDs
         // (team_uid, role_id, node_id) when building each account's entitlement arrays.
         const [nodes, teams, roles, folders] = await Promise.all([

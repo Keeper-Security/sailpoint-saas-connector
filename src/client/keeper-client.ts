@@ -107,13 +107,7 @@ export class KeeperClient {
      */
     private async executeCommand(
         command: string,
-        options: { syncFirst?: boolean } = {}
     ): Promise<RequestResultResponse> {
-        const syncFirst = options.syncFirst ?? true
-        if (syncFirst) {
-            await this.runCommand('sync-down -f')
-            await this.runCommand('enterprise-down -f')
-        }
         return this.runCommand(command)
     }
 
@@ -182,7 +176,7 @@ export class KeeperClient {
     async testConnection(): Promise<Record<string, never>> {
         // Test connection is a lightweight auth/connectivity ping, so skip the
         // pre-command sync-down to keep it fast and independent of vault state.
-        await this.executeCommand('this-device', { syncFirst: false })
+        await this.executeCommand('this-device')
         return {}
     }
 
@@ -392,6 +386,14 @@ export class KeeperClient {
      */
     private escapeArg(value: string): string {
         return value.replace(/"/g, '\\"')
+    }
+
+    async syncEnterprise(): Promise<void>{
+        await this.runCommand('enterprise-down -f')
+    }
+
+    async syncVault(): Promise<void>{
+        await this.runCommand('sync-down -f')
     }
 
     async listTeams(): Promise<KeeperTeam[]> {

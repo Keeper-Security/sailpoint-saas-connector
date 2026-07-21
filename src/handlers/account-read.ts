@@ -29,6 +29,12 @@ export function createAccountReadHandler(client: KeeperClient) {
         // Fetch the user and the entitlement catalogs in parallel. The catalogs are
         // needed to translate Commander's name-based `teams`/`roles`/`node` values
         // on the user into stable IDs that match the entitlement schemas.
+
+        await client.syncEnterprise()
+        logger.info('Synced enterprise')
+        await client.syncVault()
+        logger.info('Synced vault')
+        
         const [user, nodes, teams, roles, folders] = await Promise.all([
             client.getUser(email),
             client.listNodes(),
