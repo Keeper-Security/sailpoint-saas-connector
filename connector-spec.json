@@ -1,5 +1,5 @@
 {
-	"name": "keeper-security",
+	"name": "Keeper Security SK",
 	"commands": [
 		"std:account:list",
 		"std:account:read",
@@ -280,6 +280,33 @@
 					"name": "parentId",
 					"type": "string",
 					"description": "Parent folder UID (absent for vault root children)"
+				}
+			]
+		},
+		{
+			"type": "record",
+			"displayAttribute": "name",
+			"identityAttribute": "record_uid",
+			"attributes": [
+				{
+					"name": "record_uid",
+					"type": "string",
+					"description": "record_uid (stable numeric ID as string)"
+				},
+				{
+					"name": "name",
+					"type": "string",
+					"description": "Record display name"
+				},
+				{
+					"name": "record_category",
+					"type": "string",
+					"description": "Record source (classic / nsf)"
+				},
+				{
+					"name": "type",
+					"type": "string",
+					"description": "Record type"
 				}
 			]
 		}

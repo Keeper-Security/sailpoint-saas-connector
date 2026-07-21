@@ -1,5 +1,5 @@
 import { logger, StdAccountListOutput, StdEntitlementListOutput } from '@sailpoint/connector-sdk'
-import { KeeperFolder, KeeperNode, KeeperRole, KeeperTeam, KeeperUser } from '../model/keeper-entities'
+import { KeeperFolder, KeeperNode, KeeperRole, KeeperTeam, KeeperUser, KeeperRecord } from '../model/keeper-entities'
 
 export const KEEPER_NODE_PATH_SEPARATOR = '\\'
 
@@ -132,6 +132,23 @@ export function toNodeEntitlement(node: KeeperNode): StdEntitlementListOutput {
             parentId: node.parent_id != null ? String(node.parent_id) : null,
             parentPath: node.parent_node ?? null,
             isolated: node.isolated ?? false,
+        },
+    }
+}
+
+export function toRecordEntitlement(record: KeeperRecord): StdEntitlementListOutput {
+    const id = String(record.record_uid)
+    return {
+        identity: id,
+        uuid: id,
+        type: 'record',
+        
+        attributes: {
+            id,
+            name: record.title ?? '',
+            record_category: record.record_category ?? '',
+            record_uid: id,
+            type: record.type ?? '',
         },
     }
 }

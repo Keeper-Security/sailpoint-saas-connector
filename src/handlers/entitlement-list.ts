@@ -14,9 +14,10 @@ import {
     toNodeEntitlement,
     toRoleEntitlement,
     toTeamEntitlement,
+    toRecordEntitlement,
 } from '../utils/keeper-mappings'
 
-const SUPPORTED_TYPES = ['node', 'team', 'role', 'folder'] as const
+const SUPPORTED_TYPES = ['node', 'team', 'role', 'folder', 'record'] as const
 
 export function createEntitlementListHandler(client: KeeperClient) {
     return async (
@@ -60,6 +61,14 @@ export function createEntitlementListHandler(client: KeeperClient) {
                 logger.info(`Fetched ${roles.length} Keeper roles`)
                 for (const role of roles) {
                     res.send(toRoleEntitlement(role, nodePathToId))
+                }
+                return
+            }
+            case 'record': {
+                const records = await client.listRecords()
+                logger.info(`Fetched ${records.length} Keeper records`)
+                for (const record of records) {
+                    res.send(toRecordEntitlement(record))
                 }
                 return
             }

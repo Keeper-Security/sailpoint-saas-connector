@@ -72,6 +72,12 @@ export interface KeeperNode {
     provisioning?: unknown
 }
 
+export interface KeeperRecord {
+    record_uid: string
+    title: string
+    record_category: string
+    type: string
+}
 export type KeeperFolderType = 'classic' | 'nsf'
 
 export interface KeeperFolder {
