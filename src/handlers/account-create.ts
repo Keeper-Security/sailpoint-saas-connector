@@ -21,7 +21,7 @@ export function createAccountCreateHandler(client: KeeperClient) {
         // Email is the account identifier in our schema. ISC sends it either in
         // `attributes.email` or as `input.identity` (both are usually the same
         // value at create time). We accept either.
-        const email = normalizeString(attrs.email) ?? normalizeString(input?.identity)
+        const email = firstEntitlementValue(attrs.email) ?? normalizeString(input?.identity)
         if (!email) {
             throw new ConnectorError('std:account:create requires an email in attributes.email or input.identity')
         }
@@ -30,14 +30,17 @@ export function createAccountCreateHandler(client: KeeperClient) {
         // enforces them on the create form). We re-check here so API/Postman
         // callers that bypass ISC's form validation get a clear, actionable
         // error instead of a cryptic Commander failure downstream.
-        const name = normalizeString(attrs.name)
+        const name = firstEntitlementValue(attrs.name)
         if (!name) {
             throw new ConnectorError(
                 `std:account:create for "${email}" is missing required attribute "name" ` + `(the user's display name).`
             )
         }
 
-        const nodeId = normalizeString(attrs.node)
+        // `node` is a managed entitlement, so ISC delivers it as an array
+        // (e.g. ["70411693850651"]) even though it is single-valued. Accept both
+        // the array shape (ISC access requests) and a scalar (Postman/API callers).
+        const nodeId = firstEntitlementValue(attrs.node)
         if (!nodeId) {
             throw new ConnectorError(
                 `std:account:create for "${email}" is missing required attribute "node" ` +
@@ -52,7 +55,7 @@ export function createAccountCreateHandler(client: KeeperClient) {
         const createOptions: CreateUserOptions = {
             email,
             name,
-            jobTitle: normalizeString(attrs.jobTitle),
+            jobTitle: firstEntitlementValue(attrs.jobTitle),
             nodeId,
         }
 
@@ -106,4 +109,13 @@ function normalizeStringArray(value: unknown): string[] | undefined {
     const raw: unknown[] = Array.isArray(value) ? value : [value]
     const result = raw.map((v) => (typeof v === 'string' ? v.trim() : '')).filter((v) => v !== '')
     return result.length === 0 ? undefined : result
+}
+
+/**
+ * Read a single-valued attribute that ISC may deliver either as a scalar string
+ * (Postman/API callers) or as an array (managed entitlements like `node`, even
+ * when single-valued). Returns the first non-empty trimmed value, or undefined.
+ */
+function firstEntitlementValue(value: unknown): string | undefined {
+    return normalizeString(value) ?? normalizeStringArray(value)?.[0]
 }
