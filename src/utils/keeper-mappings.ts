@@ -154,7 +154,7 @@ export function toRecordEntitlement(record: KeeperRecord, entitlement_permission
         identity: id,
         uuid: id,
         type: 'record',
-        
+
         attributes: {
             id,
             displayName: record.title + ' [' + entitlement_permission + ']',
@@ -230,8 +230,14 @@ export function toAccount(user: KeeperUser, maps: KeeperIdMaps): StdAccountListO
     return {
         identity: user.email,
         uuid: String(user.user_id),
+        // Deliberately omit the `locked` flag. Keeper's `Locked` status maps
+        // to ISC "Disabled" (via `disabled` above) because our
+        // std:account:disable/enable handlers use `enterprise-user --lock/
+        // --unlock` under the hood. Setting `locked: true` would make ISC
+        // suppress the Enable/Disable action and look for an unlock command
+        // we don't publish. The raw Keeper state is still readable in
+        // `attributes.status` for reporting and filtering.
         disabled,
-        locked: user.status === 'Locked' ? true : false,
         attributes: {
             userId: String(user.user_id),
             email: user.email,
@@ -254,10 +260,7 @@ export function toAccount(user: KeeperUser, maps: KeeperIdMaps): StdAccountListO
  * One SailPoint folder entitlement = folder UID + permission code.
  * Classic: NP|MU|MR|MUR. NSF: V|SM|CM|CSM|FM.
  */
-export function toFolderEntitlement(
-    folder: KeeperFolder,
-    permission: FolderPermission
-): StdEntitlementListOutput {
+export function toFolderEntitlement(folder: KeeperFolder, permission: FolderPermission): StdEntitlementListOutput {
     const id = toFolderEntitlementId(folder.uid, permission)
     const label = permissionLabel(folder.folderType, permission)
     const baseName = (folder.path || folder.name || folder.uid).trim()
@@ -280,12 +283,14 @@ export function toFolderEntitlement(
 
 /** Expand one Keeper folder into all permission entitlements for its type. */
 export function toFolderEntitlements(folder: KeeperFolder): StdEntitlementListOutput[] {
-    return permissionsForFolderType(folder.folderType).map((permission) =>
-        toFolderEntitlement(folder, permission)
-    )
+    return permissionsForFolderType(folder.folderType).map((permission) => toFolderEntitlement(folder, permission))
 }
 
-function translateNames(names: string[], nameToId: Map<string, string>, missingMsg: (name: string) => string): string[] {
+function translateNames(
+    names: string[],
+    nameToId: Map<string, string>,
+    missingMsg: (name: string) => string
+): string[] {
     const result: string[] = []
     for (const name of names) {
         const id = nameToId.get(name)
