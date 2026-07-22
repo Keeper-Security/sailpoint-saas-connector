@@ -1,5 +1,11 @@
 import { logger, StdAccountListOutput, StdEntitlementListOutput } from '@sailpoint/connector-sdk'
 import { KeeperFolder, KeeperNode, KeeperRole, KeeperTeam, KeeperUser, KeeperRecord } from '../model/keeper-entities'
+import {
+    FolderPermission,
+    permissionLabel,
+    permissionsForFolderType,
+    toFolderEntitlementId,
+} from './folder-permissions'
 
 export const KEEPER_NODE_PATH_SEPARATOR = '\\'
 
@@ -234,20 +240,39 @@ export function toAccount(user: KeeperUser, maps: KeeperIdMaps): StdAccountListO
     }
 }
 
-export function toFolderEntitlement(folder: KeeperFolder): StdEntitlementListOutput {
-    const id = folder.uid
+/**
+ * One SailPoint folder entitlement = folder UID + permission code.
+ * Classic: NP|MU|MR|MUR. NSF: V|SM|CM|CSM|FM.
+ */
+export function toFolderEntitlement(
+    folder: KeeperFolder,
+    permission: FolderPermission
+): StdEntitlementListOutput {
+    const id = toFolderEntitlementId(folder.uid, permission)
+    const label = permissionLabel(folder.folderType, permission)
+    const baseName = (folder.path || folder.name || folder.uid).trim()
     return {
         identity: id,
         uuid: id,
         type: 'folder',
         attributes: {
             id,
-            name: folder.name ?? '',
-            path: folder.path || folder.name || id,
+            uid: folder.uid,
+            name: `${baseName} [${label}]`,
+            path: folder.path || folder.name || folder.uid,
             folderType: folder.folderType,
             parentId: folder.parentId ?? null,
+            permission,
+            permissionLabel: label,
         },
     }
+}
+
+/** Expand one Keeper folder into all permission entitlements for its type. */
+export function toFolderEntitlements(folder: KeeperFolder): StdEntitlementListOutput[] {
+    return permissionsForFolderType(folder.folderType).map((permission) =>
+        toFolderEntitlement(folder, permission)
+    )
 }
 
 function translateNames(names: string[], nameToId: Map<string, string>, missingMsg: (name: string) => string): string[] {

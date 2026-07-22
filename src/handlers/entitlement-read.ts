@@ -17,6 +17,11 @@ import {
     toRoleEntitlement,
     toTeamEntitlement,
 } from '../utils/keeper-mappings'
+import {
+    FolderPermission,
+    isValidPermission,
+    parseFolderEntitlementId,
+} from '../utils/folder-permissions'
 
 const SUPPORTED_TYPES = ['node', 'team', 'role', 'folder'] as const
 
@@ -94,15 +99,23 @@ export function createEntitlementReadHandler(client: KeeperClient) {
             }
 
             case 'folder': {
+                const { uid, permission } = parseFolderEntitlementId(identity)
                 const folders = await client.listAllFolders()
-                const folder = folders.find((f) => f.uid === identity)
+                const folder = folders.find((f) => f.uid === uid)
                 if (!folder) {
                     throw new ConnectorError(
-                        `Keeper folder with id "${identity}" not found`,
+                        `Keeper folder with uid "${uid}" not found`,
                         ConnectorErrorType.NotFound
                     )
                 }
-                res.send(toFolderEntitlement(folder))
+                if (!isValidPermission(folder.folderType, permission)) {
+                    throw new ConnectorError(
+                        `Invalid permission "${permission}" for folderType "${folder.folderType}" ` +
+                            `(id "${identity}")`,
+                        ConnectorErrorType.NotFound
+                    )
+                }
+                res.send(toFolderEntitlement(folder, permission as FolderPermission))
                 return
             }
 
