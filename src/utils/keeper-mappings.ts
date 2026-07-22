@@ -142,8 +142,8 @@ export function toNodeEntitlement(node: KeeperNode): StdEntitlementListOutput {
     }
 }
 
-export function toRecordEntitlement(record: KeeperRecord): StdEntitlementListOutput {
-    const id = String(record.record_uid)
+export function toRecordEntitlement(record: KeeperRecord, entitlement_permission: string): StdEntitlementListOutput {
+    const id = String(record.record_uid) + ':' + entitlement_permission
     return {
         identity: id,
         uuid: id,
@@ -151,10 +151,12 @@ export function toRecordEntitlement(record: KeeperRecord): StdEntitlementListOut
         
         attributes: {
             id,
+            displayName: record.title + ' [' + entitlement_permission + ']',
             name: record.title ?? '',
             record_category: record.record_category ?? '',
-            record_uid: id,
+            record_uid: record.record_uid,
             type: record.type ?? '',
+            permission: entitlement_permission,
         },
     }
 }

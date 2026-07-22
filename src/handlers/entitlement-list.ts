@@ -70,13 +70,23 @@ export function createEntitlementListHandler(client: KeeperClient) {
             }
             case 'record': {
                 const records = await client.listRecords()
+                const classic_permissions = ['View Only', 'Can Edit','Can Share','Can Edit & Share','Owner']
+                const nsf_permissions = ['Viewer', 'Share Manager','Content Manager','Content and Share Manager', 'Full Manager','Owner']
                 logger.info(`Fetched ${records.length} Keeper records`)
                 for (const record of records) {
-                    res.send(toRecordEntitlement(record))
+                    if(record.record_category.toLowerCase() === 'classic'){
+                        for(const perm of classic_permissions){
+                            res.send(toRecordEntitlement(record,perm));
+                        }
                 }
+                else{
+                    for(const perm of nsf_permissions){
+                        res.send(toRecordEntitlement(record,perm));
+                    }
+                }
+            }
                 return
             }
-            
             case 'folder': {
                 const folders = await client.listAllFolders()
                 logger.info(`Fetched ${folders.length} Keeper folders`)
