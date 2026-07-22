@@ -74,6 +74,11 @@
 				"description": "Keeper enterprise user status (Invited, Active, Locked, etc.)"
 			},
 			{
+				"name": "accountStatus",
+				"type": "string",
+				"description": "Keeper enterprise user status (Invited, Active, Locked)"
+			},
+			{
 				"name": "jobTitle",
 				"type": "string",
 				"description": "Job title"
