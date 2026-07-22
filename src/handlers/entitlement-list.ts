@@ -10,7 +10,7 @@ import { KeeperClient } from '../client/keeper-client'
 import {
     buildFolderMaps,
     buildNodePathMap,
-    toFolderEntitlement,
+    toFolderEntitlements,
     toNodeEntitlement,
     toRoleEntitlement,
     toTeamEntitlement,
@@ -89,10 +89,16 @@ export function createEntitlementListHandler(client: KeeperClient) {
             }
             case 'folder': {
                 const folders = await client.listAllFolders()
-                logger.info(`Fetched ${folders.length} Keeper folders`)
+                let entitlementCount = 0
                 for (const folder of folders) {
-                    res.send(toFolderEntitlement(folder))
+                    for (const ent of toFolderEntitlements(folder)) {
+                        res.send(ent)
+                        entitlementCount++
+                    }
                 }
+                logger.info(
+                    `Fetched ${folders.length} Keeper folders → ${entitlementCount} folder entitlements (by permission)`
+                )
                 return
             }
 
