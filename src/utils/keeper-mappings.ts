@@ -9,8 +9,14 @@ import {
 
 export const KEEPER_NODE_PATH_SEPARATOR = '\\'
 
-/** Keeper user statuses that we treat as "not disabled" for ISC. */
-const ACTIVE_LIKE_STATUSES = new Set(['Active', 'Invited'])
+/**
+ * Keeper user statuses that we treat as "not disabled" for ISC. Only `Active`
+ * qualifies: `Invited` users have been sent an invitation but haven't set up
+ * their vault yet, so they can't actually sign in — surfacing them as
+ * "Enabled" in ISC would misrepresent their real usability. They flip to
+ * `Active` (and thus Enabled) automatically once they accept the invite.
+ */
+const ACTIVE_LIKE_STATUSES = new Set(['Active'])
 
 export interface KeeperIdMaps {
     /** Full node path -> node_id (as string). */
@@ -142,8 +148,8 @@ export function toNodeEntitlement(node: KeeperNode): StdEntitlementListOutput {
     }
 }
 
-export function toRecordEntitlement(record: KeeperRecord): StdEntitlementListOutput {
-    const id = String(record.record_uid)
+export function toRecordEntitlement(record: KeeperRecord, entitlement_permission: string): StdEntitlementListOutput {
+    const id = String(record.record_uid) + ':' + entitlement_permission
     return {
         identity: id,
         uuid: id,
@@ -151,10 +157,12 @@ export function toRecordEntitlement(record: KeeperRecord): StdEntitlementListOut
         
         attributes: {
             id,
+            displayName: record.title + ' [' + entitlement_permission + ']',
             name: record.title ?? '',
             record_category: record.record_category ?? '',
-            record_uid: id,
+            record_uid: record.record_uid,
             type: record.type ?? '',
+            permission: entitlement_permission,
         },
     }
 }
@@ -223,11 +231,13 @@ export function toAccount(user: KeeperUser, maps: KeeperIdMaps): StdAccountListO
         identity: user.email,
         uuid: String(user.user_id),
         disabled,
+        locked: user.status === 'Locked' ? true : false,
         attributes: {
             userId: String(user.user_id),
             email: user.email,
             name: user.name ?? '',
             status,
+            accountStatus: user.status ?? '',
             jobTitle: user.job_title ?? '',
             twoFactorEnabled: user['2fa_enabled'] ?? false,
             aliases: user.alias ?? [],
