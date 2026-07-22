@@ -285,18 +285,33 @@
 		},
 		{
 			"type": "record",
-			"displayAttribute": "name",
-			"identityAttribute": "record_uid",
+			"displayAttribute": "displayName",
+			"identityAttribute": "id",
 			"attributes": [
 				{
-					"name": "record_uid",
+					"name": "id",
 					"type": "string",
-					"description": "record_uid (stable numeric ID as string)"
+					"description": "Composite entitlement id: {record_uid}:{permission} (e.g. abc123:edit)"
+				},
+				{
+					"name": "displayName",
+					"type": "string",
+					"description": "Assignment UI label formatted as '{name} [{permission}]' (e.g. Payroll DB [edit])"
 				},
 				{
 					"name": "name",
 					"type": "string",
-					"description": "Record display name"
+					"description": "Keeper record title only (no permission suffix)"
+				},
+				{
+					"name": "record_uid",
+					"type": "string",
+					"description": "Keeper record UID only"
+				},
+				{
+					"name": "permission",
+					"type": "string",
+					"description": "Share right level (e.g. view, edit, share) — mapped to Keeper share flags"
 				},
 				{
 					"name": "record_category",
@@ -306,7 +321,7 @@
 				{
 					"name": "type",
 					"type": "string",
-					"description": "Record type"
+					"description": "Keeper record type"
 				}
 			]
 		}
