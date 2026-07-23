@@ -35,9 +35,9 @@ export function createEntitlementListHandler(client: KeeperClient) {
 
         const vaultTree = await client.listVaultTree();
 
-        const records = getRecordList(vaultTree) 
+        
 
-        console.log("vault records structure fetched",records)
+        // console.log("vault records structure fetched",records)
         switch (type) {
             case 'node': {
                 const nodes = await client.listNodes()
@@ -74,22 +74,13 @@ export function createEntitlementListHandler(client: KeeperClient) {
                 return
             }
             case 'record': {
-                const records = await client.listRecords()
-                const classic_permissions = ['View Only', 'Can Edit','Can Share','Can Edit & Share','Owner']
-                const nsf_permissions = ['Viewer', 'Share Manager','Content Manager','Content and Share Manager', 'Full Manager','Owner']
-                logger.info(`Fetched ${records.length} Keeper records`)
+                const records = getRecordList(vaultTree) 
+                // console.log("vault records structure fetched",records)
+                // logger.info(`Fetched ${records.length} Keeper records`)
                 for (const record of records) {
-                    if(record.record_category.toLowerCase() === 'classic'){
-                        for(const perm of classic_permissions){
-                            res.send(toRecordEntitlement(record,perm));
-                        }
+                    console.log("record fetched",record)
+                    res.send(toRecordEntitlement(record))
                 }
-                else{
-                    for(const perm of nsf_permissions){
-                        res.send(toRecordEntitlement(record,perm));
-                    }
-                }
-            }
                 return
             }
             case 'folder': {
