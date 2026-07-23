@@ -9,7 +9,7 @@ import {
     StdAccountEnableOutput,
 } from '@sailpoint/connector-sdk'
 import { KeeperClient } from '../client/keeper-client'
-import { buildFolderMaps, buildIdMaps, toAccount } from '../utils/keeper-mappings'
+import { buildAccountMaps, toAccount } from '../utils/keeper-mappings'
 
 export function createAccountEnableHandler(client: KeeperClient) {
     return async (
@@ -25,16 +25,10 @@ export function createAccountEnableHandler(client: KeeperClient) {
         logger.info(`Unlocking Keeper vault account ${email}`)
         await client.unlockUser(email)
 
-        // Return the refreshed account view so ISC sees `disabled: false` and
-        // the updated Keeper status (Active). Reuses the same catalog lookup
-        // as account:list so entitlement joins stay intact.
-        const [user, nodes, teams, roles, folders] = await Promise.all([
-            client.getUser(email),
-            client.listNodes(),
-            client.listTeams(),
-            client.listRoles(),
-            client.listAllFolders(),
-        ])
+        // Return the refreshed account view so ISC sees `disabled: false`
+        // and the updated Keeper status (Active).
+        const user = await client.getUser(email)
+        const folders = await client.listAllFolders()
 
         if (!user) {
             throw new ConnectorError(
@@ -43,11 +37,7 @@ export function createAccountEnableHandler(client: KeeperClient) {
             )
         }
 
-        const maps = {
-            ...buildIdMaps(nodes, teams, roles),
-            ...buildFolderMaps(folders, teams),
-        }
-        res.send(toAccount(user, maps))
+        res.send(toAccount(user, buildAccountMaps(folders)))
     }
 }
 

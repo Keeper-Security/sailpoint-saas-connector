@@ -19,16 +19,29 @@ export const KEEPER_NODE_PATH_SEPARATOR = '\\'
 const ACTIVE_LIKE_STATUSES = new Set(['Active'])
 
 export interface KeeperIdMaps {
-    /** Full node path -> node_id (as string). */
+    /** Full node path -> node_id (as string). Used by entitlement handlers. */
     nodePathToId: Map<string, string>
-    /** Team display name -> team_uid. */
+    /** Team display name -> team_uid. Used by entitlement handlers only. */
     teamNameToUid: Map<string, string>
-    /** Role display name -> role_id (as string). */
+    /** Role display name -> role_id (as string). Used by entitlement handlers only. */
     roleNameToId: Map<string, string>
     /** lowercase email -> folder identities (direct shares) */
     userEmailToFolderIds: Map<string, string[]>
     /** team_uid -> folder identities */
     teamUidToFolderIds: Map<string, string[]>
+}
+
+/**
+ * Minimal lookup map needed by `toAccount()` after Commander started
+ * returning stable IDs directly on each user record. The only join left is
+ * email -> folder entitlement identities for the `folders` attribute; the
+ * `node` value is passed through as-is (its human-readable name lives on
+ * the node entitlement, so ISC renders it correctly in the entitlement
+ * assignments panel without a separate `nodePath` attribute).
+ */
+export interface AccountMaps {
+    /** lowercase email -> folder entitlement identities (direct shares). */
+    userEmailToFolderIds: Map<string, string[]>
 }
 
 /**
@@ -89,6 +102,31 @@ function registerFirstOrWarn(map: Map<string, string>, key: string, value: strin
                 `Consider making ${kind} names unique across nodes.`
         )
     }
+}
+
+/**
+ * Build the lightweight lookup map that account handlers need. The only
+ * catalog account:list / read / enable / disable / create / update can't
+ * derive from the user record alone is folders (for the `folders`
+ * entitlement attribute); everything else — node, teams, roles — is now
+ * inline on the user as stable IDs.
+ *
+ * The heavier `buildIdMaps` machinery is only needed by entitlement handlers.
+ */
+export function buildAccountMaps(folders: KeeperFolder[]): AccountMaps {
+    const userEmailToFolderIds = new Map<string, string[]>()
+    for (const folder of folders) {
+        if (!folder.uid) continue
+        for (const email of folder.users ?? []) {
+            const key = email.trim().toLowerCase()
+            if (!key) continue
+            const list = userEmailToFolderIds.get(key) ?? []
+            if (!list.includes(folder.uid)) list.push(folder.uid)
+            userEmailToFolderIds.set(key, list)
+        }
+    }
+
+    return { userEmailToFolderIds }
 }
 
 export function buildFolderMaps(
@@ -209,21 +247,13 @@ export function toRoleEntitlement(role: KeeperRole, nodePathToId: Map<string, st
     }
 }
 
-export function toAccount(user: KeeperUser, maps: KeeperIdMaps): StdAccountListOutput {
-    const nodePath = user.node ?? null
-    const nodeId = nodePath ? maps.nodePathToId.get(nodePath) ?? null : null
-
-    const teamUids = translateNames(
-        user.teams ?? [],
-        maps.teamNameToUid,
-        (name) => `Keeper team "${name}" on user ${user.email} not found in team catalog; skipping`
-    )
-    const roleIds = translateNames(
-        user.roles ?? [],
-        maps.roleNameToId,
-        (name) => `Keeper role "${name}" on user ${user.email} not found in role catalog; skipping`
-    )
-
+export function toAccount(user: KeeperUser, maps: AccountMaps): StdAccountListOutput {
+    // Commander returns stable IDs directly on the user record:
+    //   user.node   = node_id (string, single-valued entitlement)
+    //   user.teams  = team_uid array
+    //   user.roles  = role_id array (as strings)
+    // All three are passed through as-is; ISC renders their human-readable
+    // names via the linked entitlements in the assignments panel.
     const status = user.status ?? ''
     const disabled = status !== '' && !ACTIVE_LIKE_STATUSES.has(status)
 
@@ -247,10 +277,9 @@ export function toAccount(user: KeeperUser, maps: KeeperIdMaps): StdAccountListO
             jobTitle: user.job_title ?? '',
             twoFactorEnabled: user['2fa_enabled'] ?? false,
             aliases: user.alias ?? [],
-            nodePath,
-            node: nodeId,
-            teams: teamUids,
-            roles: roleIds,
+            node: user.node ?? null,
+            teams: user.teams ?? [],
+            roles: user.roles ?? [],
             folders: maps.userEmailToFolderIds.get((user.email ?? '').toLowerCase()) ?? [],
         },
     }
@@ -284,21 +313,4 @@ export function toFolderEntitlement(folder: KeeperFolder, permission: FolderPerm
 /** Expand one Keeper folder into all permission entitlements for its type. */
 export function toFolderEntitlements(folder: KeeperFolder): StdEntitlementListOutput[] {
     return permissionsForFolderType(folder.folderType).map((permission) => toFolderEntitlement(folder, permission))
-}
-
-function translateNames(
-    names: string[],
-    nameToId: Map<string, string>,
-    missingMsg: (name: string) => string
-): string[] {
-    const result: string[] = []
-    for (const name of names) {
-        const id = nameToId.get(name)
-        if (id) {
-            result.push(id)
-        } else {
-            logger.warn(missingMsg(name))
-        }
-    }
-    return result
 }

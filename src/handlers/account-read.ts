@@ -9,7 +9,7 @@ import {
     StdAccountReadOutput,
 } from '@sailpoint/connector-sdk'
 import { KeeperClient } from '../client/keeper-client'
-import { buildFolderMaps, buildIdMaps, toAccount } from '../utils/keeper-mappings'
+import { buildAccountMaps, toAccount } from '../utils/keeper-mappings'
 
 export function createAccountReadHandler(client: KeeperClient) {
     return async (
@@ -26,35 +26,19 @@ export function createAccountReadHandler(client: KeeperClient) {
 
         logger.info(`Reading Keeper vault account ${email}`)
 
-        // Fetch the user and the entitlement catalogs in parallel. The catalogs are
-        // needed to translate Commander's name-based `teams`/`roles`/`node` values
-        // on the user into stable IDs that match the entitlement schemas.
-
         await client.syncEnterprise()
         logger.info('Synced enterprise')
         await client.syncVault()
         logger.info('Synced vault')
-        
-        const [user, nodes, teams, roles, folders] = await Promise.all([
-            client.getUser(email),
-            client.listNodes(),
-            client.listTeams(),
-            client.listRoles(),
-            client.listAllFolders(),
-        ])
+
+        const user = await client.getUser(email)
+        const folders = await client.listAllFolders()
 
         if (!user) {
-            throw new ConnectorError(
-                `Keeper user with email "${email}" not found`,
-                ConnectorErrorType.NotFound
-            )
+            throw new ConnectorError(`Keeper user with email "${email}" not found`, ConnectorErrorType.NotFound)
         }
 
-        const maps = {
-            ...buildIdMaps(nodes, teams, roles),
-            ...buildFolderMaps(folders, teams),
-        }
-        res.send(toAccount(user, maps))
+        res.send(toAccount(user, buildAccountMaps(folders)))
     }
 }
 
