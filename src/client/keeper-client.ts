@@ -2,7 +2,7 @@ import { ConnectorError } from '@sailpoint/connector-sdk'
 import axios from 'axios'
 import { RequestResultResponse, SubmitRequestResponse } from '../model/service-mode-api'
 import { SourceConfig } from '../model/config'
-import { KeeperNode, KeeperRole, KeeperTeam, KeeperUser, KeeperRecord, KeeperFolder } from '../model/keeper-entities'
+import { KeeperNode, KeeperRole, KeeperTeam, KeeperUser, KeeperRecord, KeeperFolder, KeeperVaultTreeData } from '../model/keeper-entities'
 import { handleAPIErrorResponse } from '../utils/api-error'
 import { requireConfigValue } from '../utils/errors'
 
@@ -396,8 +396,9 @@ export class KeeperClient {
         await this.runCommand('sync-down -f')
     }
 
-    async listVaultTree(): Promise<RequestResultResponse>{
-        return this.runCommand('tree -s -ns -r -v --format json')
+    async listVaultTree(): Promise<KeeperVaultTreeData> {
+        const result = await this.runCommand('tree -s -ns -r -v --format json')
+        return this.parseObjectData<KeeperVaultTreeData>(result.data, 'vaultTree')
     }
 
     async listTeams(): Promise<KeeperTeam[]> {
@@ -477,6 +478,38 @@ export class KeeperClient {
 
         if (data == null) {
             return []
+        }
+
+        throw new ConnectorError(`Unexpected Keeper ${kind} response type: ${typeof data}`)
+    }
+
+    /**
+     * Same as parseArrayData, but for a single JSON object (e.g. vault tree).
+     */
+    private parseObjectData<T extends object>(data: unknown, kind: string): T {
+        if (data != null && typeof data === 'object' && !Array.isArray(data)) {
+            return data as T
+        }
+
+        if (typeof data === 'string') {
+            const trimmed = data.trim()
+            if (trimmed === '') {
+                throw new ConnectorError(`Keeper ${kind} response was empty`)
+            }
+            try {
+                const parsed = JSON.parse(trimmed)
+                if (parsed != null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                    return parsed as T
+                }
+                throw new ConnectorError(
+                    `Keeper ${kind} response parsed but is not an object (got ${Array.isArray(parsed) ? 'array' : typeof parsed})`
+                )
+            } catch (err) {
+                if (err instanceof ConnectorError) {
+                    throw err
+                }
+                throw new ConnectorError(`Failed to parse Keeper ${kind} response as JSON: ${(err as Error).message}`)
+            }
         }
 
         throw new ConnectorError(`Unexpected Keeper ${kind} response type: ${typeof data}`)
