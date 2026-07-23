@@ -187,8 +187,6 @@ export function toNodeEntitlement(node: KeeperNode): StdEntitlementListOutput {
 }
 
 export function toRecordEntitlement(record: KeeperRecord): StdEntitlementListOutput {
-
-    console.log("record fetched in toRecordEntitlement",record)
     const id = String(record.record_uid_perm)
     return {
         identity: id,
