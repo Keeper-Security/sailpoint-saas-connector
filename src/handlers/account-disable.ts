@@ -9,7 +9,7 @@ import {
     StdAccountDisableOutput,
 } from '@sailpoint/connector-sdk'
 import { KeeperClient } from '../client/keeper-client'
-import { buildFolderMaps, buildIdMaps, toAccount } from '../utils/keeper-mappings'
+import { buildAccountMaps, toAccount } from '../utils/keeper-mappings'
 
 export function createAccountDisableHandler(client: KeeperClient) {
     return async (
@@ -25,16 +25,10 @@ export function createAccountDisableHandler(client: KeeperClient) {
         logger.info(`Locking Keeper vault account ${email}`)
         await client.lockUser(email)
 
-        // Return the refreshed account view so ISC sees the new `disabled` flag
-        // and the updated Keeper status (Locked). We re-run the same catalog
-        // lookup used by account:list so ISC's entitlement joins stay intact.
-        const [user, nodes, teams, roles, folders] = await Promise.all([
-            client.getUser(email),
-            client.listNodes(),
-            client.listTeams(),
-            client.listRoles(),
-            client.listAllFolders(),
-        ])
+        // Return the refreshed account view so ISC sees the new `disabled`
+        // flag and the updated Keeper status (Locked).
+        const user = await client.getUser(email)
+        const folders = await client.listAllFolders()
 
         if (!user) {
             throw new ConnectorError(
@@ -43,11 +37,7 @@ export function createAccountDisableHandler(client: KeeperClient) {
             )
         }
 
-        const maps = {
-            ...buildIdMaps(nodes, teams, roles),
-            ...buildFolderMaps(folders, teams),
-        }
-        res.send(toAccount(user, maps))
+        res.send(toAccount(user, buildAccountMaps(folders)))
     }
 }
 

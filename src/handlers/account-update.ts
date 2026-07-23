@@ -11,8 +11,7 @@ import {
     StdAccountUpdateOutput,
 } from '@sailpoint/connector-sdk'
 import { KeeperClient, UpdateUserOptions } from '../client/keeper-client'
-import { KeeperRole, KeeperTeam } from '../model/keeper-entities'
-import { buildIdMaps, toAccount } from '../utils/keeper-mappings'
+import { buildAccountMaps, toAccount } from '../utils/keeper-mappings'
 
 /**
  * Attributes exposed on the account schema that this handler intentionally
@@ -20,7 +19,7 @@ import { buildIdMaps, toAccount } from '../utils/keeper-mappings'
  * logged and skipped rather than failing the whole update. `email` is handled
  * separately (below) because it's the identity, not a plain read-only field.
  */
-const READ_ONLY_ATTRS = new Set(['userId', 'status', 'twoFactorEnabled', 'aliases', 'nodePath'])
+const READ_ONLY_ATTRS = new Set(['userId', 'status', 'accountStatus', 'twoFactorEnabled', 'aliases'])
 
 export function createAccountUpdateHandler(client: KeeperClient) {
     return async (
@@ -46,33 +45,27 @@ export function createAccountUpdateHandler(client: KeeperClient) {
 
         // Set on a multi-valued entitlement means "make membership exactly
         // match this list", which we implement as a diff against the current
-        // membership. That requires pre-fetching (a) the user's current
-        // team/role names and (b) the catalog for the relevant kind(s) so we
-        // can translate ISC-supplied IDs into names.
-        const needsRoleDiff = changes.some((c) => c.op === AttributeChangeOp.Set && c.attribute === 'roles')
-        const needsTeamDiff = changes.some((c) => c.op === AttributeChangeOp.Set && c.attribute === 'teams')
+        // membership. Since Commander now returns team_uid / role_id directly
+        // on the user record, both sides of the diff are IDs — no catalog
+        // lookup or name translation needed. All we need for a Set is the
+        // user's current membership from getUser.
+        const needsCurrent = changes.some(
+            (c) => c.op === AttributeChangeOp.Set && (c.attribute === 'roles' || c.attribute === 'teams')
+        )
 
-        let currentRoleNames: string[] = []
-        let currentTeamNames: string[] = []
-        let rolesCatalog: KeeperRole[] = []
-        let teamsCatalog: KeeperTeam[] = []
+        let currentRoleIds: string[] = []
+        let currentTeamIds: string[] = []
 
-        if (needsRoleDiff || needsTeamDiff) {
-            const [user, roles, teams] = await Promise.all([
-                client.getUser(email),
-                needsRoleDiff ? client.listRoles() : Promise.resolve<KeeperRole[]>([]),
-                needsTeamDiff ? client.listTeams() : Promise.resolve<KeeperTeam[]>([]),
-            ])
+        if (needsCurrent) {
+            const user = await client.getUser(email)
             if (!user) {
                 throw new ConnectorError(
                     `Keeper user with email "${email}" not found`,
                     ConnectorErrorType.NotFound
                 )
             }
-            currentRoleNames = user.roles ?? []
-            currentTeamNames = user.teams ?? []
-            rolesCatalog = roles
-            teamsCatalog = teams
+            currentRoleIds = user.roles ?? []
+            currentTeamIds = user.teams ?? []
         }
 
         // Aggregate every change into a single UpdateUserOptions payload so
@@ -101,24 +94,10 @@ export function createAccountUpdateHandler(client: KeeperClient) {
                     })
                     break
                 case 'roles':
-                    applyMultiValuedChange(
-                        change,
-                        'role',
-                        addRoles,
-                        removeRoles,
-                        currentRoleNames,
-                        buildRoleIdToName(rolesCatalog)
-                    )
+                    applyMultiValuedChange(change, addRoles, removeRoles, currentRoleIds)
                     break
                 case 'teams':
-                    applyMultiValuedChange(
-                        change,
-                        'team',
-                        addTeams,
-                        removeTeams,
-                        currentTeamNames,
-                        buildTeamIdToName(teamsCatalog)
-                    )
+                    applyMultiValuedChange(change, addTeams, removeTeams, currentTeamIds)
                     break
                 case 'email':
                     rejectEmailChange(change, email)
@@ -163,19 +142,16 @@ export function createAccountUpdateHandler(client: KeeperClient) {
 }
 
 async function fetchFreshAccount(client: KeeperClient, email: string): Promise<StdAccountUpdateOutput> {
-    const [user, nodes, teams, roles] = await Promise.all([
-        client.getUser(email),
-        client.listNodes(),
-        client.listTeams(),
-        client.listRoles(),
-    ])
+    // Only folders remains — node_id / team_uid / role_id are inline on user.
+    const user = await client.getUser(email)
+    const folders = await client.listAllFolders()
     if (!user) {
         throw new ConnectorError(
             `Keeper user with email "${email}" not found after update`,
             ConnectorErrorType.NotFound
         )
     }
-    return toAccount(user, buildIdMaps(nodes, teams, roles))
+    return toAccount(user, buildAccountMaps(folders))
 }
 
 function hasActionableChange(opts: UpdateUserOptions): boolean {
@@ -216,13 +192,17 @@ function applyOptionalStringChange(change: AttributeChange, assign: (value: stri
     assign(normalizeString(change.value) ?? '')
 }
 
+/**
+ * Diff a multi-valued entitlement change into `adds` and `removes` sets of
+ * IDs. Both `currentIds` (from getUser) and ISC-supplied values are stable
+ * IDs (team_uid / role_id), so the Set-diff is a direct set comparison —
+ * no catalog lookup, no name translation.
+ */
 function applyMultiValuedChange(
     change: AttributeChange,
-    kind: 'role' | 'team',
     adds: Set<string>,
     removes: Set<string>,
-    currentNames: string[],
-    idToName: Map<string, string>
+    currentIds: string[]
 ): void {
     const values = coerceStringArray(change.value)
 
@@ -234,28 +214,13 @@ function applyMultiValuedChange(
             for (const v of values) removes.add(v)
             return
         case AttributeChangeOp.Set: {
-            // Translate desired IDs -> names via the catalog so we can diff
-            // against `currentNames` (which comes from getUser as names).
-            // Any ID not in the catalog is skipped with a warning rather
-            // than failing the whole update (matches aggregation-lag
-            // tolerance elsewhere in this connector).
-            const desiredNames = new Set<string>()
-            for (const id of values) {
-                const name = idToName.get(id)
-                if (!name) {
-                    logger.warn(
-                        `std:account:update Set on ${kind}s: ${kind} id "${id}" not in catalog; skipping`
-                    )
-                    continue
-                }
-                desiredNames.add(name)
+            const desired = new Set(values)
+            const current = new Set(currentIds)
+            for (const id of desired) {
+                if (!current.has(id)) adds.add(id)
             }
-            const currentSet = new Set(currentNames)
-            for (const name of desiredNames) {
-                if (!currentSet.has(name)) adds.add(name)
-            }
-            for (const name of currentSet) {
-                if (!desiredNames.has(name)) removes.add(name)
+            for (const id of current) {
+                if (!desired.has(id)) removes.add(id)
             }
             return
         }
@@ -276,24 +241,6 @@ function rejectEmailChange(change: AttributeChange, currentEmail: string): void 
     throw new ConnectorError(
         'cannot change "email" via std:account:update; email is the account identity'
     )
-}
-
-function buildRoleIdToName(roles: KeeperRole[]): Map<string, string> {
-    const map = new Map<string, string>()
-    for (const r of roles) {
-        if (r.role_id == null || !r.name) continue
-        map.set(String(r.role_id), r.name)
-    }
-    return map
-}
-
-function buildTeamIdToName(teams: KeeperTeam[]): Map<string, string> {
-    const map = new Map<string, string>()
-    for (const t of teams) {
-        if (!t.team_uid || !t.name) continue
-        map.set(t.team_uid, t.name)
-    }
-    return map
 }
 
 function safeKeyId(input: StdAccountUpdateInput): string | null {
