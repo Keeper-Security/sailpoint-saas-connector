@@ -327,6 +327,11 @@
 					"name": "type",
 					"type": "string",
 					"description": "Keeper record type"
+				},
+				{
+					"name":"path",
+					"type":"string",
+					"description":"Keeper record path"
 				}
 			]
 		}

@@ -396,6 +396,10 @@ export class KeeperClient {
         await this.runCommand('sync-down -f')
     }
 
+    async listVaultTree(): Promise<RequestResultResponse>{
+        return this.runCommand('tree -s -ns -r -v --format json')
+    }
+
     async listTeams(): Promise<KeeperTeam[]> {
         const result = await this.executeCommand(`enterprise-info --teams --format json -v --columns ${TEAM_COLUMNS}`)
         return this.parseArrayData<KeeperTeam>(result.data, 'teams')

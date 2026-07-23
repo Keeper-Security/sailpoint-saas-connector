@@ -32,6 +32,9 @@ export function createEntitlementListHandler(client: KeeperClient) {
         await client.syncEnterprise()
         logger.info('Synced enterprise while listing entitlements')
 
+        const vaultTree = await client.listVaultTree();
+        
+        console.log("vault tree structure fetched",vaultTree.data)
         switch (type) {
             case 'node': {
                 const nodes = await client.listNodes()
