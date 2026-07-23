@@ -5,6 +5,7 @@
 		"std:account:read",
 		"std:account:create",
 		"std:account:update",
+		"std:account:delete",
 		"std:account:disable",
 		"std:account:enable",
 		"std:entitlement:list",
