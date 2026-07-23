@@ -258,7 +258,7 @@
 		},
 		{
 			"type": "folder",
-			"displayAttribute": "path",
+			"displayAttribute": "name",
 			"identityAttribute": "id",
 			"attributes": [
 				{
