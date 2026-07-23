@@ -48,7 +48,7 @@
 		}
 	],
 	"accountSchema": {
-		"displayAttribute": "email",
+		"displayAttribute": "name",
 		"identityAttribute": "email",
 		"attributes": [
 			{
