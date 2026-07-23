@@ -9,13 +9,12 @@ export interface KeeperUser {
     name?: string
     status?: string
     transfer_status?: string
-    /** Full node path, e.g. "Metron Security\\Metronlabs". */
     node?: string
     team_count?: number
-    /** Team display names (not team_uid). */
+    /** Team memberships as `team_uid` values (stable IDs). */
     teams?: string[]
     role_count?: number
-    /** Role display names (not role_id). */
+    /** Role memberships as `role_id` values serialized as strings. */
     roles?: string[]
     alias?: string[]
     job_title?: string

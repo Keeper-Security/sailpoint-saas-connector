@@ -6,7 +6,7 @@ import {
     StdAccountListOutput,
 } from '@sailpoint/connector-sdk'
 import { KeeperClient } from '../client/keeper-client'
-import { buildFolderMaps, buildIdMaps, toAccount } from '../utils/keeper-mappings'
+import { buildAccountMaps, toAccount } from '../utils/keeper-mappings'
 
 export function createAccountListHandler(client: KeeperClient) {
     return async (
@@ -19,21 +19,10 @@ export function createAccountListHandler(client: KeeperClient) {
         logger.info('Synced enterprise')
         await client.syncVault()
         logger.info('Synced vault')
-        // Aggregate the catalog first so we can translate names/paths to stable IDs
-        // (team_uid, role_id, node_id) when building each account's entitlement arrays.
-        const [nodes, teams, roles, folders] = await Promise.all([
-            client.listNodes(),
-            client.listTeams(),
-            client.listRoles(),
-            client.listAllFolders(),
-        ])
-        const maps = {
-            ...buildIdMaps(nodes, teams, roles),
-            ...buildFolderMaps(folders, teams),
-        }
-        logger.info(
-            `Loaded catalog: ${nodes.length} nodes, ${teams.length} teams, ${roles.length} roles`
-        )
+
+        const folders = await client.listAllFolders()
+        const maps = buildAccountMaps(folders)
+        logger.info(`Loaded catalog: ${folders.length} folders`)
 
         const users = await client.listUsers()
         logger.info(`Fetched ${users.length} Keeper users`)

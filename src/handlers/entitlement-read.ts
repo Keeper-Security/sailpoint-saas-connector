@@ -62,11 +62,9 @@ export function createEntitlementReadHandler(client: KeeperClient) {
             }
 
             case 'team': {
-                const [teams, nodes, folders] = await Promise.all([
-                    client.listTeams(),
-                    client.listNodes(),
-                    client.listAllFolders(),
-                ])
+                const teams = await client.listTeams()
+                const nodes = await client.listNodes()
+                const folders = await client.listAllFolders()
                 const team = teams.find((t) => t.team_uid === identity)
                 if (!team) {
                     throw new ConnectorError(
@@ -86,7 +84,8 @@ export function createEntitlementReadHandler(client: KeeperClient) {
             }
 
             case 'role': {
-                const [roles, nodes] = await Promise.all([client.listRoles(), client.listNodes()])
+                const roles = await client.listRoles()
+                const nodes = await client.listNodes()
                 const role = roles.find((r) => String(r.role_id) === identity)
                 if (!role) {
                     throw new ConnectorError(

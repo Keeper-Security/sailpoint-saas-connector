@@ -43,11 +43,9 @@ export function createEntitlementListHandler(client: KeeperClient) {
             }
 
             case 'team': {
-                const [teams, nodes, folders] = await Promise.all([
-                    client.listTeams(),
-                    client.listNodes(),
-                    client.listAllFolders(),
-                ])
+                const teams = await client.listTeams()
+                const nodes = await client.listNodes()
+                const folders = await client.listAllFolders()
                 const nodePathToId = buildNodePathMap(nodes)
                 const { teamUidToFolderIds } = buildFolderMaps(folders, teams)
                 logger.info(`Fetched ${teams.length} Keeper teams`)
@@ -60,7 +58,8 @@ export function createEntitlementListHandler(client: KeeperClient) {
             }
 
             case 'role': {
-                const [roles, nodes] = await Promise.all([client.listRoles(), client.listNodes()])
+                const roles = await client.listRoles()
+                const nodes = await client.listNodes()
                 const nodePathToId = buildNodePathMap(nodes)
                 logger.info(`Fetched ${roles.length} Keeper roles`)
                 for (const role of roles) {
