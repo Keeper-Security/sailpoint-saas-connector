@@ -29,6 +29,16 @@ export interface CreateUserOptions {
 }
 
 /**
+ * Snapshot of the Keeper Commander session backing this connector. Populated
+ * during `testConnection` and cached on the client so subsequent handlers can
+ * read it without a round-trip. Sourced from Commander's `whoami --json`.
+ */
+export interface WhoamiInfo {
+    /** Email of the Commander service account driving this connector. */
+    user: string
+}
+
+/**
  * Inputs for `KeeperClient.updateUser`. Every attribute field is optional and
  * only emitted if the caller sets it. The distinction between `undefined`
  * (attribute untouched) and `''` (attribute cleared) matters for `jobTitle`,
@@ -72,6 +82,13 @@ export class KeeperClient {
     private readonly serviceModeApiKey: string
     private readonly pollTimeoutMs: number
 
+    /**
+     * Cached `whoami` snapshot. Populated the first time `testConnection` or
+     * `getWhoami` runs and kept for the lifetime of this KeeperClient (i.e.
+     * this connector process). Refresh by calling `refreshWhoami()`.
+     */
+    private whoamiCache: WhoamiInfo | null = null
+
     constructor(config: SourceConfig) {
         this.serviceModeApiUrl = requireConfigValue(config?.serviceModeApiUrl, 'serviceModeApiUrl')
         this.serviceModeApiKey = requireConfigValue(config?.serviceModeApiKey, 'serviceModeApiKey')
@@ -92,18 +109,10 @@ export class KeeperClient {
     /**
      * Run a Commander command via the async execute + poll pipeline.
      *
-     * By default we refresh both Commander caches before running the payload
-     * so read commands never operate on stale local data:
-     *   - `sync-down -f`       refreshes the vault cache (records, shared folders)
-     *   - `enterprise-down -f` refreshes the enterprise cache (users, teams,
-     *                          roles, nodes, node hierarchy)
-     *
-     * The refreshes run sequentially — enterprise-down only fires if
-     * sync-down succeeded, which keeps error handling and log ordering
-     * predictable at the cost of ~1 extra refresh worth of latency.
-     *
-     * Callers that only need connectivity/auth checks (e.g. test-connection)
-     * can opt out via `{ syncFirst: false }`.
+     * Submit a Commander command via Service Mode and wait for its result.
+     * Callers are responsible for calling `syncVault()` / `syncEnterprise()`
+     * beforehand when they need fresh local Commander state — this method
+     * never syncs implicitly.
      */
     private async executeCommand(
         command: string,
@@ -173,11 +182,45 @@ export class KeeperClient {
         throw new ConnectorError(`Keeper API poll timed out after ${timeoutSeconds} seconds`)
     }
 
+    /**
+     * Lightweight auth/connectivity check. Also warms the whoami cache so
+     * downstream handlers can read the Commander session identity without
+     * making their own round-trip. Throws if Commander is not logged in.
+     */
     async testConnection(): Promise<Record<string, never>> {
-        // Test connection is a lightweight auth/connectivity ping, so skip the
-        // pre-command sync-down to keep it fast and independent of vault state.
-        await this.executeCommand('this-device')
+        await this.refreshWhoami()
         return {}
+    }
+
+    /**
+     * Return the cached whoami snapshot, fetching it on demand if this is the
+     * first call in the current process. Prefer this over `refreshWhoami` when
+     * you just want to read stable session info (Commander user, data center).
+     */
+    async getWhoami(): Promise<WhoamiInfo> {
+        if (!this.whoamiCache) {
+            this.whoamiCache = await this.fetchWhoami()
+        }
+        return this.whoamiCache
+    }
+
+    /** Force a fresh whoami round-trip and update the cache. */
+    async refreshWhoami(): Promise<WhoamiInfo> {
+        this.whoamiCache = await this.fetchWhoami()
+        return this.whoamiCache
+    }
+
+    /**
+     * Actually hit Commander's `whoami --json`. No syncVault / syncEnterprise
+     * needed because whoami is a session lookup, not vault or enterprise data.
+     */
+    private async fetchWhoami(): Promise<WhoamiInfo> {
+        const result = await this.executeCommand('whoami')
+        const data = result.data as WhoamiInfo
+
+        return {
+            user: data.user,
+        }
     }
 
     async listUsers(): Promise<KeeperUser[]> {
