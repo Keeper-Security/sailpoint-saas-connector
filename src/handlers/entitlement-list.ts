@@ -16,6 +16,7 @@ import {
     toTeamEntitlement,
     toRecordEntitlement,
 } from '../utils/keeper-mappings'
+import { getRecordList } from '../utils/helper'
 
 const SUPPORTED_TYPES = ['node', 'team', 'role', 'folder', 'record'] as const
 
@@ -32,6 +33,11 @@ export function createEntitlementListHandler(client: KeeperClient) {
         await client.syncEnterprise()
         logger.info('Synced enterprise while listing entitlements')
 
+        const vaultTree = await client.listVaultTree();
+
+        const records = getRecordList(vaultTree) 
+
+        console.log("vault records structure fetched",records)
         switch (type) {
             case 'node': {
                 const nodes = await client.listNodes()
