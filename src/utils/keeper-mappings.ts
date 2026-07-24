@@ -42,6 +42,7 @@ export interface KeeperIdMaps {
 export interface AccountMaps {
     /** lowercase email -> folder entitlement identities (direct shares). */
     userEmailToFolderIds: Map<string, string[]>
+    userEmailToRecordIds: Map<string,string[]>
 }
 
 /**
@@ -115,6 +116,7 @@ function registerFirstOrWarn(map: Map<string, string>, key: string, value: strin
  */
 export function buildAccountMaps(folders: KeeperFolder[]): AccountMaps {
     const userEmailToFolderIds = new Map<string, string[]>()
+    const userEmailToRecordIds = new Map<string, string[]>()
     for (const folder of folders) {
         if (!folder.uid) continue
         for (const email of folder.users ?? []) {
@@ -126,7 +128,7 @@ export function buildAccountMaps(folders: KeeperFolder[]): AccountMaps {
         }
     }
 
-    return { userEmailToFolderIds }
+    return { userEmailToFolderIds, userEmailToRecordIds }
 }
 
 export function buildFolderMaps(
