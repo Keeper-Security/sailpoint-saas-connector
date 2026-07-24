@@ -76,9 +76,12 @@ export interface KeeperNode {
  */
 export interface KeeperRecord {
     record_uid: string
+    record_uid_perm: string
     title: string
     record_category: string
     type: string
+    path:string
+    permission: string
 }
 
 export type KeeperFolderType = 'classic' | 'nsf'
