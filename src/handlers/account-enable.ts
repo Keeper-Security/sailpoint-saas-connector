@@ -9,7 +9,8 @@ import {
     StdAccountEnableOutput,
 } from '@sailpoint/connector-sdk'
 import { KeeperClient } from '../client/keeper-client'
-import { buildAccountMaps, toAccount } from '../utils/keeper-mappings'
+import { buildAccountMaps, buildRecordMaps, toAccount } from '../utils/keeper-mappings'
+import { getRecordList } from '../utils/helper'
 
 export function createAccountEnableHandler(client: KeeperClient) {
     return async (
@@ -29,6 +30,7 @@ export function createAccountEnableHandler(client: KeeperClient) {
         // and the updated Keeper status (Active).
         const user = await client.getUser(email)
         const folders = await client.listAllFolders()
+        const records = getRecordList(await client.listVaultTree(),await client.getWhoami()) 
 
         if (!user) {
             throw new ConnectorError(
@@ -37,7 +39,7 @@ export function createAccountEnableHandler(client: KeeperClient) {
             )
         }
 
-        res.send(toAccount(user, buildAccountMaps(folders)))
+        res.send(toAccount(user, buildAccountMaps(folders), buildRecordMaps(records)))
     }
 }
 

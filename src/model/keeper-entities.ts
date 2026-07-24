@@ -82,6 +82,7 @@ export interface KeeperRecord {
     type: string
     path:string
     permission: string
+    users?: string[]
 }
 
 export type KeeperFolderType = 'classic' | 'nsf'

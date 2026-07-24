@@ -74,11 +74,10 @@ export function createEntitlementListHandler(client: KeeperClient) {
                 return
             }
             case 'record': {
-                const records = getRecordList(vaultTree) 
-                // console.log("vault records structure fetched",records)
-                // logger.info(`Fetched ${records.length} Keeper records`)
+                const whoami = await client.getWhoami()
+                const records = getRecordList(vaultTree,whoami) 
+                
                 for (const record of records) {
-                    console.log("record fetched",record)
                     res.send(toRecordEntitlement(record))
                 }
                 return

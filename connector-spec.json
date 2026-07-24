@@ -136,6 +136,15 @@
 				"managed": true,
 				"multi": true,
 				"schemaObjectType": "folder"
+			},
+			{
+				"name": "records",
+				"type": "string",
+				"description": "Classic/NSF records shared directly to this user.",
+				"entitlement": true,
+				"managed": true,
+				"multi": true,
+				"schemaObjectType": "record"
 			}
 		]
 	},

@@ -44,6 +44,10 @@ export interface AccountMaps {
     userEmailToFolderIds: Map<string, string[]>
 }
 
+export interface RecordMaps{
+    userEmailToRecordIds: Map<string, string[]>
+}
+
 /**
  * Builds a node's full path from its `parent_node` and `name`.
  * Root nodes (no parent) resolve to just the node's name.
@@ -127,6 +131,20 @@ export function buildAccountMaps(folders: KeeperFolder[]): AccountMaps {
     }
 
     return { userEmailToFolderIds }
+}
+
+export function buildRecordMaps(records: KeeperRecord[]): RecordMaps {
+    const userEmailToRecordIds = new Map<string, string[]>()
+    for (const record of records){
+        for (const email of record.users ?? []) {
+            const key = email.trim().toLowerCase()
+            if (!key) continue
+            const list = userEmailToRecordIds.get(key) ?? []
+            if (!list.includes(record.record_uid_perm)) list.push(record.record_uid_perm)
+            userEmailToRecordIds.set(key, list)
+        }
+    }
+    return { userEmailToRecordIds }
 }
 
 export function buildFolderMaps(
@@ -248,7 +266,7 @@ export function toRoleEntitlement(role: KeeperRole, nodePathToId: Map<string, st
     }
 }
 
-export function toAccount(user: KeeperUser, maps: AccountMaps): StdAccountListOutput {
+export function toAccount(user: KeeperUser, maps: AccountMaps, recordMaps: RecordMaps): StdAccountListOutput {
     // Commander returns stable IDs directly on the user record:
     //   user.node   = node_id (string, single-valued entitlement)
     //   user.teams  = team_uid array
@@ -282,6 +300,7 @@ export function toAccount(user: KeeperUser, maps: AccountMaps): StdAccountListOu
             teams: user.teams ?? [],
             roles: user.roles ?? [],
             folders: maps.userEmailToFolderIds.get((user.email ?? '').toLowerCase()) ?? [],
+            records: recordMaps.userEmailToRecordIds.get((user.email ?? '').toLowerCase()) ?? [],
         },
     }
 }
