@@ -95,7 +95,7 @@ function addUserFolderEntitlements(
 ): void {
     if (!folder.uid) return
     for (const [email, treePerms] of Object.entries(folder.userPermissions ?? {})) {
-        const key = email.trim().toLowerCase()
+        const key = email?.trim().toLowerCase()
         if (!key) continue
         const entId = folderEntitlementIdFromTreePerms(folder, treePerms)
         if (!entId) continue
@@ -109,7 +109,7 @@ function addTeamFolderEntitlements(
 ): void {
     if (!folder.uid) return
     for (const [teamUid, treePerms] of Object.entries(folder.teamPermissions ?? {})) {
-        if (!teamUid.trim()) continue
+        if (!teamUid?.trim()) continue
         const entId = folderEntitlementIdFromTreePerms(folder, treePerms)
         if (!entId) continue
         pushFolderEntitlement(map, teamUid, entId)
@@ -132,7 +132,7 @@ export function buildRecordMaps(records: KeeperRecord[]): RecordMaps {
     const userEmailToRecordIds = new Map<string, string[]>()
     for (const record of records){
         for (const email of record.users ?? []) {
-            const key = email.trim().toLowerCase()
+            const key = email?.trim().toLowerCase()
             if (!key) continue
             const list = userEmailToRecordIds.get(key) ?? []
             if (!list.includes(record.record_uid_perm)) list.push(record.record_uid_perm)
@@ -278,7 +278,7 @@ export function toAccount(user: KeeperUser, maps: AccountMaps, recordMaps: Recor
 export function toFolderEntitlement(folder: KeeperFolder, permission: FolderPermission): StdEntitlementListOutput {
     const id = toFolderEntitlementId(folder.uid, permission)
     const label = permissionLabel(folder.folderType, permission)
-    const baseName = (folder.name || folder.path || folder.uid).trim()
+    const baseName = (folder.name || folder.path || folder.uid)?.trim()
     return {
         identity: id,
         uuid: id,

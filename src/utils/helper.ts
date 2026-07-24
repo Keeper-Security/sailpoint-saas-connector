@@ -115,7 +115,7 @@ const NSF_CATALOG_PERMS = new Set(['OW'])
 const CONTAINER_KINDS = new Set(['shared_folder', 'folder', 'nested_share_folder'])
 
 function normalizeEmail(email: string): string {
-    return email.trim().toLowerCase()
+    return email?.trim().toLowerCase()
 }
 
 function usersOnNode(node: KeeperVaultTreeNode): KeeperShareUser[] {
@@ -161,7 +161,7 @@ function stripLeadingSlash(path: string): string {
 
 function toKeeperFolder(node: KeeperVaultTreeNode, parentId: string | undefined, folderType: KeeperFolderType): KeeperFolder {
     const uid = node.uid!.trim()
-    const rawPath = (node.path || node.name || uid).trim()
+    const rawPath = (node.path || node.name || uid)?.trim()
     const userPermissions: Record<string, string[]> = {}
     for (const u of usersOnNode(node)) {
         const email = normalizeEmail(u.email)
