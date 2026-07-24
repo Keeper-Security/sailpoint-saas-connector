@@ -1,8 +1,8 @@
 import { KeeperRecord, KeeperUserSharePermissions, KeeperVaultTreeData, KeeperVaultTreeNode } from '../model/keeper-entities'
 import { WhoamiInfo } from '../client/keeper-client'
 
-function getChildrenRecords(childrenNode: KeeperVaultTreeNode[], _whoami: WhoamiInfo): KeeperRecord[] {
-    const records: KeeperRecord[] = []
+function getChildrenRecords(childrenNode: KeeperVaultTreeNode[], _whoami: WhoamiInfo): any[] {
+    const records:any[] = []
 
     for (const child_node of childrenNode) {
         if ((child_node.kind === 'shared_folder' || child_node.kind === 'folder') && child_node.children !== undefined) {
@@ -23,7 +23,7 @@ function getChildrenRecords(childrenNode: KeeperVaultTreeNode[], _whoami: Whoami
                     record_category = 'nested'
                 }
     
-                const keeper_record: KeeperRecord = {
+                const keeper_record: any = {
                     record_uid: child_node.uid || '',
                     record_uid_perm: child_node.uid || '',
                     permission: '',
@@ -31,6 +31,7 @@ function getChildrenRecords(childrenNode: KeeperVaultTreeNode[], _whoami: Whoami
                     record_category: record_category,
                     type: child_node.record_type ?? '',
                     path: child_node.path,
+                    user_permissions: user_permissions,
                 }
     
                 records.push(keeper_record)
@@ -53,8 +54,15 @@ export function getRecordList(_vaultTree: KeeperVaultTreeData, _whoami: WhoamiIn
     const sail_entitlements: KeeperRecord[] = []
 
     for (const record of filter_records) {
+        const user_permissions = record.user_permissions;
+        const lusers = user_permissions.users;
         if (record.record_category === 'classic') {
-            for (const permission of Object.keys(classic_permissions)) {          
+
+
+
+            for (const permission of Object.keys(classic_permissions)) {      
+                
+                const get_users = lusers.filter((user: any) => user.permissions.includes(permission)).map((user: any) => user.email);
 
                 sail_entitlements.push({
                     record_uid: record.record_uid,
@@ -64,10 +72,12 @@ export function getRecordList(_vaultTree: KeeperVaultTreeData, _whoami: WhoamiIn
                     type: record.type,
                     path: record.path,
                     permission: classic_permissions[permission],
+                    users: get_users,
                 })
             }
         } else {
             for (const permission of Object.keys(nsf_permissions)) {
+                const get_users = lusers.filter((user: any) => user.permissions.includes(permission)).map((user: any) => user.email);
 
                 sail_entitlements.push({
                     record_uid: record.record_uid,
@@ -77,6 +87,7 @@ export function getRecordList(_vaultTree: KeeperVaultTreeData, _whoami: WhoamiIn
                     type: record.type,
                     path: record.path,
                     permission: nsf_permissions[permission],
+                    users: get_users,
                 })
             }
         }
