@@ -405,11 +405,6 @@ export class KeeperClient {
         return getManageableFolders(vaultTree, whoami.user)
     }
 
-    async listRecords(): Promise<KeeperRecord[]> {
-        const result = await this.executeCommand(`list --format json`)
-        return this.parseArrayData<KeeperRecord>(result.data, 'records')
-    }
-
     /**
      * Commander's Service Mode returns command output either as a parsed JSON array
      * (queue-mode v2) or as a raw stdout string that must be parsed. Handle both.
