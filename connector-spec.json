@@ -96,11 +96,6 @@
 				"multi": true
 			},
 			{
-				"name": "nodePath",
-				"type": "string",
-				"description": "Full node path (display only). Node identity lives in the node entitlement."
-			},
-			{
 				"name": "node",
 				"type": "string",
 				"description": "Enterprise node the user belongs to (single-valued entitlement). Required on create because Keeper enterprise users must be placed in a node.",
