@@ -29,7 +29,7 @@ export function createAccountDisableHandler(client: KeeperClient) {
         // Return the refreshed account view so ISC sees the new `disabled`
         // flag and the updated Keeper status (Locked).
         const user = await client.getUser(email)
-        const folders = await client.listAllFolders()
+        const folders = await client.listManageableFolders()
         const records = getRecordList(await client.listVaultTree(),await client.getWhoami()) 
 
         if (!user) {

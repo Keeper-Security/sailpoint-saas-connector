@@ -2,6 +2,7 @@ import { logger, StdAccountListOutput, StdEntitlementListOutput } from '@sailpoi
 import { KeeperFolder, KeeperNode, KeeperRole, KeeperTeam, KeeperUser, KeeperRecord } from '../model/keeper-entities'
 import {
     FolderPermission,
+    folderEntitlementIdFromTreePerms,
     permissionLabel,
     permissionsForFolderType,
     toFolderEntitlementId,
@@ -17,19 +18,6 @@ export const KEEPER_NODE_PATH_SEPARATOR = '\\'
  * `Active` (and thus Enabled) automatically once they accept the invite.
  */
 const ACTIVE_LIKE_STATUSES = new Set(['Active'])
-
-export interface KeeperIdMaps {
-    /** Full node path -> node_id (as string). Used by entitlement handlers. */
-    nodePathToId: Map<string, string>
-    /** Team display name -> team_uid. Used by entitlement handlers only. */
-    teamNameToUid: Map<string, string>
-    /** Role display name -> role_id (as string). Used by entitlement handlers only. */
-    roleNameToId: Map<string, string>
-    /** lowercase email -> folder identities (direct shares) */
-    userEmailToFolderIds: Map<string, string[]>
-    /** team_uid -> folder identities */
-    teamUidToFolderIds: Map<string, string[]>
-}
 
 /**
  * Minimal lookup map needed by `toAccount()` after Commander started
@@ -70,30 +58,6 @@ export function buildNodePathMap(nodes: KeeperNode[]): Map<string, string> {
     return map
 }
 
-export function buildIdMaps(nodes: KeeperNode[], teams: KeeperTeam[], roles: KeeperRole[]): KeeperIdMaps {
-    const nodePathToId = buildNodePathMap(nodes)
-
-    const teamNameToUid = new Map<string, string>()
-    for (const team of teams) {
-        if (!team.name || !team.team_uid) continue
-        registerFirstOrWarn(teamNameToUid, team.name, team.team_uid, 'team')
-    }
-
-    const roleNameToId = new Map<string, string>()
-    for (const role of roles) {
-        if (!role.name || role.role_id == null) continue
-        registerFirstOrWarn(roleNameToId, role.name, String(role.role_id), 'role')
-    }
-
-    return {
-        nodePathToId,
-        teamNameToUid,
-        roleNameToId,
-        userEmailToFolderIds: new Map(),
-        teamUidToFolderIds: new Map(),
-    }
-}
-
 function registerFirstOrWarn(map: Map<string, string>, key: string, value: string, kind: string): void {
     const existing = map.get(key)
     if (existing == null) {
@@ -114,22 +78,53 @@ function registerFirstOrWarn(map: Map<string, string>, key: string, value: strin
  * derive from the user record alone is folders (for the `folders`
  * entitlement attribute); everything else — node, teams, roles — is now
  * inline on the user as stable IDs.
- *
- * The heavier `buildIdMaps` machinery is only needed by entitlement handlers.
+ */
+function pushFolderEntitlement(
+    map: Map<string, string[]>,
+    key: string,
+    entitlementId: string
+): void {
+    const list = map.get(key) ?? []
+    if (!list.includes(entitlementId)) list.push(entitlementId)
+    map.set(key, list)
+}
+
+function addUserFolderEntitlements(
+    map: Map<string, string[]>,
+    folder: KeeperFolder
+): void {
+    if (!folder.uid) return
+    for (const [email, treePerms] of Object.entries(folder.userPermissions ?? {})) {
+        const key = email.trim().toLowerCase()
+        if (!key) continue
+        const entId = folderEntitlementIdFromTreePerms(folder, treePerms)
+        if (!entId) continue
+        pushFolderEntitlement(map, key, entId)
+    }
+}
+
+function addTeamFolderEntitlements(
+    map: Map<string, string[]>,
+    folder: KeeperFolder
+): void {
+    if (!folder.uid) return
+    for (const [teamUid, treePerms] of Object.entries(folder.teamPermissions ?? {})) {
+        if (!teamUid.trim()) continue
+        const entId = folderEntitlementIdFromTreePerms(folder, treePerms)
+        if (!entId) continue
+        pushFolderEntitlement(map, teamUid, entId)
+    }
+}
+
+/**
+ * Account `folders` = uid:CODE for catalog folders only.
+ * Callers must pass listManageableFolders() (classic MU / NSF OW).
  */
 export function buildAccountMaps(folders: KeeperFolder[]): AccountMaps {
     const userEmailToFolderIds = new Map<string, string[]>()
     for (const folder of folders) {
-        if (!folder.uid) continue
-        for (const email of folder.users ?? []) {
-            const key = email.trim().toLowerCase()
-            if (!key) continue
-            const list = userEmailToFolderIds.get(key) ?? []
-            if (!list.includes(folder.uid)) list.push(folder.uid)
-            userEmailToFolderIds.set(key, list)
-        }
+        addUserFolderEntitlements(userEmailToFolderIds, folder)
     }
-
     return { userEmailToFolderIds }
 }
 
@@ -147,42 +142,13 @@ export function buildRecordMaps(records: KeeperRecord[]): RecordMaps {
     return { userEmailToRecordIds }
 }
 
-export function buildFolderMaps(
-    folders: KeeperFolder[],
-    teams: KeeperTeam[]
-): Pick<KeeperIdMaps, 'userEmailToFolderIds' | 'teamUidToFolderIds'> {
-    const teamNameToUid = new Map<string, string>()
-    for (const t of teams) {
-        if (t.name && t.team_uid) teamNameToUid.set(t.name, t.team_uid)
-    }
-
-    const userEmailToFolderIds = new Map<string, string[]>()
+/** Team `folders` = uid:CODE for catalog folders only. */
+export function buildTeamFolderMap(folders: KeeperFolder[]): Map<string, string[]> {
     const teamUidToFolderIds = new Map<string, string[]>()
-
-    const push = (map: Map<string, string[]>, key: string, folderId: string) => {
-        const list = map.get(key) ?? []
-        if (!list.includes(folderId)) list.push(folderId)
-        map.set(key, list)
-    }
-
     for (const folder of folders) {
-        if (!folder.uid) continue
-        const folderId = folder.uid
-
-        for (const email of folder.users ?? []) {
-            const key = email.trim().toLowerCase()
-            if (key) push(userEmailToFolderIds, key, folderId)
-        }
-
-        for (const teamRef of folder.teams ?? []) {
-            const ref = teamRef.trim()
-            if (!ref) continue
-            const teamUid = teamNameToUid.get(ref) ?? ref // ref may already be uid
-            push(teamUidToFolderIds, teamUid, folderId)
-        }
+        addTeamFolderEntitlements(teamUidToFolderIds, folder)
     }
-
-    return { userEmailToFolderIds, teamUidToFolderIds }
+    return teamUidToFolderIds
 }
 
 // -------------------- Commander -> SailPoint output --------------------
@@ -312,7 +278,7 @@ export function toAccount(user: KeeperUser, maps: AccountMaps, recordMaps: Recor
 export function toFolderEntitlement(folder: KeeperFolder, permission: FolderPermission): StdEntitlementListOutput {
     const id = toFolderEntitlementId(folder.uid, permission)
     const label = permissionLabel(folder.folderType, permission)
-    const baseName = (folder.path || folder.name || folder.uid).trim()
+    const baseName = (folder.name || folder.path || folder.uid).trim()
     return {
         identity: id,
         uuid: id,

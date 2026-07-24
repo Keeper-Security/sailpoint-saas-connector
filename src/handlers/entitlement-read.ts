@@ -10,7 +10,7 @@ import {
 } from '@sailpoint/connector-sdk'
 import { KeeperClient } from '../client/keeper-client'
 import {
-    buildFolderMaps,
+    buildTeamFolderMap,
     buildNodePathMap,
     toFolderEntitlement,
     toNodeEntitlement,
@@ -22,6 +22,7 @@ import {
     isValidPermission,
     parseFolderEntitlementId,
 } from '../utils/folder-permissions'
+import { getManageableFolders } from '../utils/helper'
 
 const SUPPORTED_TYPES = ['node', 'team', 'role', 'folder'] as const
 
@@ -64,7 +65,7 @@ export function createEntitlementReadHandler(client: KeeperClient) {
             case 'team': {
                 const teams = await client.listTeams()
                 const nodes = await client.listNodes()
-                const folders = await client.listAllFolders()
+                const folders = await client.listManageableFolders()
                 const team = teams.find((t) => t.team_uid === identity)
                 if (!team) {
                     throw new ConnectorError(
@@ -72,7 +73,7 @@ export function createEntitlementReadHandler(client: KeeperClient) {
                         ConnectorErrorType.NotFound
                     )
                 }
-                const { teamUidToFolderIds } = buildFolderMaps(folders, teams)
+                const teamUidToFolderIds = buildTeamFolderMap(folders)
                 res.send(
                     toTeamEntitlement(
                         team,
@@ -99,11 +100,15 @@ export function createEntitlementReadHandler(client: KeeperClient) {
 
             case 'folder': {
                 const { uid, permission } = parseFolderEntitlementId(identity)
-                const folders = await client.listAllFolders()
+                const [vaultTree, whoami] = await Promise.all([
+                    client.listVaultTree(),
+                    client.getWhoami(),
+                ])
+                const folders = getManageableFolders(vaultTree, whoami.user)
                 const folder = folders.find((f) => f.uid === uid)
                 if (!folder) {
                     throw new ConnectorError(
-                        `Keeper folder with uid "${uid}" not found`,
+                        `Keeper folder with uid "${uid}" not found or not catalog-eligible (classic MU / NSF OW)`,
                         ConnectorErrorType.NotFound
                     )
                 }

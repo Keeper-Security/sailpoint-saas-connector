@@ -33,7 +33,7 @@ export function createAccountReadHandler(client: KeeperClient) {
         logger.info('Synced vault')
 
         const user = await client.getUser(email)
-        const folders = await client.listAllFolders()
+        const folders = await client.listManageableFolders()
         const records = getRecordList(await client.listVaultTree(),await client.getWhoami()) 
 
         if (!user) {

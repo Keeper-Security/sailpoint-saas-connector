@@ -93,9 +93,16 @@ export interface KeeperFolder {
     path: string
     folderType: KeeperFolderType
     parentId?: string
-    /** Filled later when membership discovery exists */
-    users?: string[]
-    teams?: string[]
+    /**
+     * Lowercase email → tree ACL permission codes for that user
+     * (classic: MU, MR, RO, …; NSF: VW, SM, CM, CSM, FM, OW, …).
+     */
+    userPermissions?: Record<string, string[]>
+    /**
+     * Team uid → tree ACL permission codes for that team
+     * (same classic/NSF codes as users).
+     */
+    teamPermissions?: Record<string, string[]>
 }
 
 // -------------------- Vault tree (`tree -s -ns -r -v --format json`) --------------------
@@ -109,17 +116,28 @@ export interface KeeperSharePermissionsKey {
 export interface KeeperShareUser {
     email: string
     permissions: string[]
+    uid?: string
 }
 
-/** classic `shared_folder` ACL. */
+/** Team share entry under `share_permissions.teams`. */
+export interface KeeperShareTeam {
+    name: string
+    uid: string
+    permissions: string[]
+}
+
+/** classic `shared_folder` / NSF folder ACL (users + optional teams). */
 export interface KeeperFolderSharePermissions {
     record_permissions?: string[]
     user_permissions?: string[]
+    users?: KeeperShareUser[]
+    teams?: KeeperShareTeam[]
 }
 
 /** `record` / `nested_record` / `nested_share_folder` ACL. */
 export interface KeeperUserSharePermissions {
     users?: KeeperShareUser[]
+    teams?: KeeperShareTeam[]
 }
 
 /**

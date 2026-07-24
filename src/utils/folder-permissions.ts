@@ -87,8 +87,41 @@ export function nsfRoleForCode(code: NsfPermission): string {
     return map[code]
 }
 
-export function expandFolderPermissions(
-    folder: KeeperFolder
-): Array<{ folder: KeeperFolder; permission: FolderPermission }> {
-    return permissionsForFolderType(folder.folderType).map((permission) => ({ folder, permission }))
+/**
+ * Map classic tree ACL codes (MU, MR, RO, …) to a single connector entitlement code.
+ */
+export function classicEntitlementFromTreePerms(perms: string[]): ClassicPermission {
+    const set = new Set(perms)
+    const hasMU = set.has('MU')
+    const hasMR = set.has('MR')
+    if (hasMU && hasMR) return 'MUR'
+    if (hasMU) return 'MU'
+    if (hasMR) return 'MR'
+    return 'NP'
+}
+
+/**
+ * Map NSF tree ACL codes (VW, SM, CM, CSM, FM, OW, CT, …) to a connector entitlement code.
+ * Highest role wins when multiple are present. OW → FM; CT → V (closest existing code).
+ */
+export function nsfEntitlementFromTreePerms(perms: string[]): NsfPermission | null {
+    const set = new Set(perms)
+    if (set.has('FM') || set.has('OW')) return 'FM'
+    if (set.has('CSM')) return 'CSM'
+    if (set.has('CM')) return 'CM'
+    if (set.has('SM')) return 'SM'
+    if (set.has('VW') || set.has('CT')) return 'V'
+    return null
+}
+
+/** Resolve account/team folder membership id (`uid:CODE`) from tree ACL for one user. */
+export function folderEntitlementIdFromTreePerms(
+    folder: KeeperFolder,
+    treePerms: string[]
+): string | null {
+    if (folder.folderType === 'classic') {
+        return toFolderEntitlementId(folder.uid, classicEntitlementFromTreePerms(treePerms))
+    }
+    const code = nsfEntitlementFromTreePerms(treePerms)
+    return code ? toFolderEntitlementId(folder.uid, code) : null
 }
