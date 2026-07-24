@@ -11,7 +11,8 @@ import {
     StdAccountUpdateOutput,
 } from '@sailpoint/connector-sdk'
 import { KeeperClient, UpdateUserOptions } from '../client/keeper-client'
-import { buildAccountMaps, toAccount } from '../utils/keeper-mappings'
+import { buildAccountMaps, buildRecordMaps, toAccount } from '../utils/keeper-mappings'
+import { getRecordList } from '../utils/helper'
 
 /**
  * Attributes exposed on the account schema that this handler intentionally
@@ -145,13 +146,14 @@ async function fetchFreshAccount(client: KeeperClient, email: string): Promise<S
     // Only folders remains — node_id / team_uid / role_id are inline on user.
     const user = await client.getUser(email)
     const folders = await client.listManageableFolders()
+    const records = getRecordList(await client.listVaultTree(),await client.getWhoami()) 
     if (!user) {
         throw new ConnectorError(
             `Keeper user with email "${email}" not found after update`,
             ConnectorErrorType.NotFound
         )
     }
-    return toAccount(user, buildAccountMaps(folders))
+    return toAccount(user, buildAccountMaps(folders), buildRecordMaps(records))
 }
 
 function hasActionableChange(opts: UpdateUserOptions): boolean {

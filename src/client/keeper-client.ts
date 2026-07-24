@@ -266,6 +266,22 @@ export class KeeperClient {
     }
 
     /**
+     * Permanently delete a Keeper enterprise user. Destructive — removes the
+     * user from the enterprise and (unless vault data was transferred first)
+     * destroys their vault records along with the account. Commander is called
+     * with `--force` to suppress the interactive "are you sure?" prompt that
+     * would otherwise stall in Service Mode.
+     *
+     * Callers wanting idempotent semantics should check with `getUser()` first
+     * and short-circuit on `null` — this method assumes the user exists and
+     * will surface a Commander error if they don't.
+     */
+    async deleteUser(email: string): Promise<void> {
+        const { safe } = this.normalizeEmailArg(email, 'deleteUser')
+        await this.executeCommand(`enterprise-user "${safe}" --delete --force`)
+    }
+
+    /**
      * Invite a new Keeper enterprise user and optionally seed their initial
      * attributes and entitlement memberships. Commander sends an invitation
      * email; the user's status is "Invited" until they accept and set up a

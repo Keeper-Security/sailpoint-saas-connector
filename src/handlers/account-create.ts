@@ -8,7 +8,8 @@ import {
     StdAccountCreateOutput,
 } from '@sailpoint/connector-sdk'
 import { CreateUserOptions, KeeperClient } from '../client/keeper-client'
-import { buildAccountMaps, toAccount } from '../utils/keeper-mappings'
+import { buildAccountMaps, buildRecordMaps, toAccount } from '../utils/keeper-mappings'
+import { getRecordList } from '../utils/helper'
 
 export function createAccountCreateHandler(client: KeeperClient) {
     return async (
@@ -70,6 +71,7 @@ export function createAccountCreateHandler(client: KeeperClient) {
         // until the user accepts the email and sets up their vault). 
         const user = await client.getUser(email)
         const folders = await client.listManageableFolders()
+        const records = getRecordList(await client.listVaultTree(),await client.getWhoami()) 
 
         if (!user) {
             throw new ConnectorError(
@@ -79,7 +81,7 @@ export function createAccountCreateHandler(client: KeeperClient) {
             )
         }
 
-        res.send(toAccount(user, buildAccountMaps(folders)))
+        res.send(toAccount(user, buildAccountMaps(folders), buildRecordMaps(records)))
     }
 }
 

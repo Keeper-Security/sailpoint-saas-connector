@@ -9,7 +9,8 @@ import {
     StdAccountReadOutput,
 } from '@sailpoint/connector-sdk'
 import { KeeperClient } from '../client/keeper-client'
-import { buildAccountMaps, toAccount } from '../utils/keeper-mappings'
+import { buildAccountMaps, buildRecordMaps, toAccount } from '../utils/keeper-mappings'
+import { getRecordList } from '../utils/helper'
 
 export function createAccountReadHandler(client: KeeperClient) {
     return async (
@@ -33,12 +34,13 @@ export function createAccountReadHandler(client: KeeperClient) {
 
         const user = await client.getUser(email)
         const folders = await client.listManageableFolders()
+        const records = getRecordList(await client.listVaultTree(),await client.getWhoami()) 
 
         if (!user) {
             throw new ConnectorError(`Keeper user with email "${email}" not found`, ConnectorErrorType.NotFound)
         }
 
-        res.send(toAccount(user, buildAccountMaps(folders)))
+        res.send(toAccount(user, buildAccountMaps(folders), buildRecordMaps(records)))
     }
 }
 
