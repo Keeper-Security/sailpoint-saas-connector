@@ -28,7 +28,7 @@ export function createAccountEnableHandler(client: KeeperClient) {
         // Return the refreshed account view so ISC sees `disabled: false`
         // and the updated Keeper status (Active).
         const user = await client.getUser(email)
-        const folders = await client.listAllFolders()
+        const folders = await client.listManageableFolders()
 
         if (!user) {
             throw new ConnectorError(

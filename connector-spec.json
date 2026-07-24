@@ -130,7 +130,7 @@
 			{
 				"name": "folders",
 				"type": "string",
-				"description": "Classic/NSF folders shared directly to this user.",
+				"description": "Folder entitlements as <folderUid>:<permission> for whoami-catalog folders only (classic: whoami has MU; NSF: whoami has OW). Classic: NP|MU|MR|MUR. NSF: V|SM|CM|CSM|FM.",
 				"entitlement": true,
 				"managed": true,
 				"multi": true,
@@ -209,8 +209,10 @@
 				{
 					"name": "folders",
 					"type": "string",
-					"description": "Folder ids shared to this team.",
-					"multi": true
+					"description": "Folder entitlements shared to this team as <folderUid>:<permission> for whoami-catalog folders only (classic MU / NSF OW). Classic: NP|MU|MR|MUR. NSF: V|SM|CM|CSM|FM.",
+					"multi": true,
+					"entitlement": true,
+					"schemaObjectType": "folder"
 				}
 			]
 		},
@@ -264,17 +266,22 @@
 				{
 					"name": "id",
 					"type": "string",
-					"description": "Keeper folder UID (classic shared folder UID or NSF UID)"
+					"description": "Folder entitlement id: <folderUid>:<permission>. Classic NP|MU|MR|MUR. NSF V|SM|CM|CSM|FM"
+				},
+				{
+					"name": "uid",
+					"type": "string",
+					"description": "Raw Keeper folder UID (without permission suffix)"
 				},
 				{
 					"name": "name",
 					"type": "string",
-					"description": "Folder name"
+					"description": "Folder name with permission label, e.g. New Demo [Manage records]"
 				},
 				{
 					"name": "path",
 					"type": "string",
-					"description": "Display path"
+					"description": "Folder path (same for all permissions of one folder)"
 				},
 				{
 					"name": "folderType",
@@ -285,6 +292,16 @@
 					"name": "parentId",
 					"type": "string",
 					"description": "Parent folder UID (absent for vault root children)"
+				},
+				{
+					"name": "permission",
+					"type": "string",
+					"description": "Permission code. Classic: NP, MU, MR, MUR. NSF: V, SM, CM, CSM, FM"
+				},
+				{
+					"name": "permissionLabel",
+					"type": "string",
+					"description": "Human-readable permission label"
 				}
 			]
 		},

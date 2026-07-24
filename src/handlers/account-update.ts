@@ -144,7 +144,7 @@ export function createAccountUpdateHandler(client: KeeperClient) {
 async function fetchFreshAccount(client: KeeperClient, email: string): Promise<StdAccountUpdateOutput> {
     // Only folders remains — node_id / team_uid / role_id are inline on user.
     const user = await client.getUser(email)
-    const folders = await client.listAllFolders()
+    const folders = await client.listManageableFolders()
     if (!user) {
         throw new ConnectorError(
             `Keeper user with email "${email}" not found after update`,

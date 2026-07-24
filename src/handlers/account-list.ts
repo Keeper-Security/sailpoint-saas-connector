@@ -20,7 +20,7 @@ export function createAccountListHandler(client: KeeperClient) {
         await client.syncVault()
         logger.info('Synced vault')
 
-        const folders = await client.listAllFolders()
+        const folders = await client.listManageableFolders()
         const maps = buildAccountMaps(folders)
         logger.info(`Loaded catalog: ${folders.length} folders`)
 

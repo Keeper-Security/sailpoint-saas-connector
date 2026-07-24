@@ -8,7 +8,7 @@ import {
 } from '@sailpoint/connector-sdk'
 import { KeeperClient } from '../client/keeper-client'
 import {
-    buildFolderMaps,
+    buildTeamFolderMap,
     buildNodePathMap,
     toFolderEntitlements,
     toNodeEntitlement,
@@ -16,7 +16,7 @@ import {
     toTeamEntitlement,
     toRecordEntitlement,
 } from '../utils/keeper-mappings'
-import { getRecordList } from '../utils/helper'
+import { getManageableFolders, getRecordList } from '../utils/helper'
 
 const SUPPORTED_TYPES = ['node', 'team', 'role', 'folder', 'record'] as const
 
@@ -51,9 +51,11 @@ export function createEntitlementListHandler(client: KeeperClient) {
             case 'team': {
                 const teams = await client.listTeams()
                 const nodes = await client.listNodes()
-                const folders = await client.listAllFolders()
+                // Catalog folders only (whoami MU / OW) so team.folders match entitlement list
+                const whoami = await client.getWhoami()
+                const folders = getManageableFolders(vaultTree, whoami.user)
                 const nodePathToId = buildNodePathMap(nodes)
-                const { teamUidToFolderIds } = buildFolderMaps(folders, teams)
+                const teamUidToFolderIds = buildTeamFolderMap(folders)
                 logger.info(`Fetched ${teams.length} Keeper teams`)
                 for (const team of teams) {
                     res.send(
@@ -83,17 +85,19 @@ export function createEntitlementListHandler(client: KeeperClient) {
                         for(const perm of classic_permissions){
                             res.send(toRecordEntitlement(record,perm));
                         }
-                }
-                else{
-                    for(const perm of nsf_permissions){
-                        res.send(toRecordEntitlement(record,perm));
+                    }
+                    else{
+                        for(const perm of nsf_permissions){
+                            res.send(toRecordEntitlement(record,perm));
+                        }
                     }
                 }
-            }
                 return
             }
             case 'folder': {
-                const folders = await client.listAllFolders()
+                // Catalog = whoami MU (classic) / OW (NSF); account maps use the same set
+                const whoami = await client.getWhoami()
+                const folders = getManageableFolders(vaultTree, whoami.user)
                 let entitlementCount = 0
                 for (const folder of folders) {
                     for (const ent of toFolderEntitlements(folder)) {
@@ -102,7 +106,8 @@ export function createEntitlementListHandler(client: KeeperClient) {
                     }
                 }
                 logger.info(
-                    `Fetched ${folders.length} Keeper folders → ${entitlementCount} folder entitlements (by permission)`
+                    `Fetched ${folders.length} Keeper folders (whoami=${whoami.user}) → ` +
+                        `${entitlementCount} folder entitlements (by permission)`
                 )
                 return
             }

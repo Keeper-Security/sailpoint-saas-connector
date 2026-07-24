@@ -5,6 +5,7 @@ import { SourceConfig } from '../model/config'
 import { KeeperNode, KeeperRole, KeeperTeam, KeeperUser, KeeperRecord, KeeperFolder, KeeperVaultTreeData } from '../model/keeper-entities'
 import { handleAPIErrorResponse } from '../utils/api-error'
 import { requireConfigValue } from '../utils/errors'
+import { getManageableFolders } from '../utils/helper'
 
 const USER_COLUMNS = 'name,status,transfer_status,node,team_count,teams,role_count,roles,alias,2fa_enabled,job_title'
 const TEAM_COLUMNS = 'restricts,node,user_count,users,queued_user_count,queued_users,role_count,roles'
@@ -343,86 +344,6 @@ export class KeeperClient {
     }
 
     /**
-     * Map one row from `ls -f -R --format json` into KeeperFolder.
-     * Returns null for non-folder rows or unknown source values.
-     *
-     * Example row:
-     * {
-     *   "type": "folder",
-     *   "uid": "Oz2TFhU8DazlqKyf88zLiA",
-     *   "name": "DemoSailPoint",
-     *   "details": "Flags: , Parent: wvTib3HCfq0ErqalHQY_dw",
-     *   "source": "classic_folder"
-     * }
-     */
-    private mapLsFolder(row: Record<string, unknown>): KeeperFolder | null {
-        if (row.type !== 'folder') {
-            return null
-        }
-
-        const uid = String(row.uid ?? '').trim()
-        if (!uid) {
-            return null
-        }
-
-        const name = String(row.name ?? '')
-        const source = String(row.source ?? '')
-
-        let folderType: KeeperFolder['folderType'] | null = null
-        if (source === 'classic_folder') {
-            folderType = 'classic'
-        } else if (source === 'nested_share_folder') {
-            folderType = 'nsf'
-        } else {
-            return null
-        }
-
-        const details = String(row.details ?? '')
-        // details looks like: "Flags: S, Parent: /" or "Flags: , Parent: <uid>"
-        const parentMatch = details.match(/Parent:\s*(.+)$/i)
-        const parentRaw = parentMatch?.[1]?.trim() ?? ''
-        const parentId = !parentRaw || parentRaw === '/' ? undefined : parentRaw
-
-        return {
-            uid,
-            name,
-            path: name,
-            folderType,
-            parentId,
-        }
-    }
-
-    /**
-     * Build a display path from folder names by walking parentId links.
-     * Example: Freshservice Demo/DemoSailPoint
-     */
-    private buildFolderNamePath(
-        folder: KeeperFolder,
-        byUid: Map<string, KeeperFolder>
-    ): string {
-        const parts: string[] = []
-        let current: KeeperFolder | undefined = folder
-        const guard = new Set<string>()
-
-        while (current) {
-            if (guard.has(current.uid)) {
-                break
-            }
-            guard.add(current.uid)
-            parts.unshift(current.name || current.uid)
-
-            const parentId = current.parentId
-            if (!parentId) {
-                break
-            }
-
-            current = byUid.get(parentId)
-        }
-
-        return parts.join('/')
-    }
-
-    /**
      * Escape double quotes inside an argument value so Commander's argparse
      * parser doesn't split the string. Values are wrapped in `"..."` at the
      * call site; this ensures embedded quotes don't terminate that wrap.
@@ -458,32 +379,14 @@ export class KeeperClient {
         const result = await this.executeCommand(`enterprise-info --nodes --format json -v --columns ${NODE_COLUMNS}`)
         return this.parseArrayData<KeeperNode>(result.data, 'nodes')
     }
-    
+
     /**
-     * List all vault folders (classic + NSF, including nested) via one recursive ls.
-     * Replaces list-sf + nsf-list for entitlement aggregation.
+     * Whoami catalog folders (classic MU; NSF OW).
+     * Used for entitlement aggregation and account/team folder attributes.
      */
-    async listAllFolders(): Promise<KeeperFolder[]> {
-        const result = await this.executeCommand('ls -f -R --format json')
-        const rows = this.parseArrayData<Record<string, unknown>>(result.data, 'folders')
-
-        const folders: KeeperFolder[] = []
-        const seen = new Set<string>()
-
-        for (const row of rows) {
-            const folder = this.mapLsFolder(row)
-            if (!folder) continue
-            if (seen.has(folder.uid)) continue
-            seen.add(folder.uid)
-            folders.push(folder)
-        }
-
-        const byUid = new Map(folders.map((f) => [f.uid, f]))
-
-        return folders.map((f) => ({
-            ...f,
-            path: this.buildFolderNamePath(f, byUid),
-        }))
+    async listManageableFolders(): Promise<KeeperFolder[]> {
+        const [vaultTree, whoami] = await Promise.all([this.listVaultTree(), this.getWhoami()])
+        return getManageableFolders(vaultTree, whoami.user)
     }
 
     async listRecords(): Promise<KeeperRecord[]> {

@@ -32,7 +32,7 @@ export function createAccountReadHandler(client: KeeperClient) {
         logger.info('Synced vault')
 
         const user = await client.getUser(email)
-        const folders = await client.listAllFolders()
+        const folders = await client.listManageableFolders()
 
         if (!user) {
             throw new ConnectorError(`Keeper user with email "${email}" not found`, ConnectorErrorType.NotFound)
