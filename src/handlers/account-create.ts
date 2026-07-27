@@ -68,7 +68,7 @@ export function createAccountCreateHandler(client: KeeperClient) {
         // matches Keeper's post-invite state (status will be "Invited"
         // until the user accepts the email and sets up their vault). 
         const user = await client.getUser(email)
-        const folders = await client.listManageableFolders()
+        const folders = await client.listAllFolders()
         const records = getRecordList(await client.listVaultTree(),await client.getWhoami()) 
 
         if (!user) {
