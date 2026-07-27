@@ -59,6 +59,8 @@ export interface UpdateUserOptions {
     removeRoleValues?: string[]
     addTeamValues?: string[]
     removeTeamValues?: string[]
+    addRecordValues?: string[]
+    removeRecordValues?: string[]
 }
 
 function sleep(ms: number): Promise<void> {
@@ -334,11 +336,38 @@ export class KeeperClient {
         for (const v of options.addRoleValues ?? []) parts.push(`--add-role "${this.escapeArg(v)}"`)
         for (const v of options.addTeamValues ?? []) parts.push(`--add-team "${this.escapeArg(v)}"`)
 
-        if (parts.length === 1) {
-            throw new ConnectorError('updateUser called with no attributes to change')
-        }
+        // if (parts.length === 1) {
+        //     throw new ConnectorError('updateUser called with no attributes to change')
+        // }
 
         await this.executeCommand(parts.join(' '))
+        for (const v of options.addRecordValues ?? []) {
+            await this.executeCommand(this.createRecordCommand(v, options.email)+' --action grant')
+        }
+
+        for (const v of options.removeRecordValues ?? []) {
+            await this.executeCommand(this.createRecordCommand(v, options.email)+' --action revoke')
+        }
+
+    }
+
+    private createRecordCommand(recordId: string, email: string): string {
+
+        const assign_perm = recordId.split(':')[1]
+
+            switch (assign_perm) {
+                case "RO":
+                    return `share-record -e ${email} "${recordId.split(':')[0]}"`
+                case "CE":
+                    return `share-record -e ${email} "${recordId.split(':')[0]}" --write`
+                case "CS":
+                    return `share-record -e ${email} "${recordId.split(':')[0]}" --share`
+                
+                default:
+                        throw new ConnectorError(`Invalid permission: ${assign_perm}`)
+
+        }
+
     }
 
     /**

@@ -12,7 +12,7 @@ import {
 } from '@sailpoint/connector-sdk'
 import { KeeperClient, UpdateUserOptions } from '../client/keeper-client'
 import { buildAccountMaps, buildRecordMaps, toAccount } from '../utils/keeper-mappings'
-import { getRecordList, coerceNonEmptyStrings, requireSingleNodeId } from '../utils/helper'
+import { getRecordList, coerceNonEmptyStrings, requireSingleNodeId, getRecordListByEmail } from '../utils/helper'
 
 /**
  * Attributes exposed on the account schema that this handler intentionally
@@ -51,22 +51,21 @@ export function createAccountUpdateHandler(client: KeeperClient) {
         // lookup or name translation needed. All we need for a Set is the
         // user's current membership from getUser.
         const needsCurrent = changes.some(
-            (c) => c.op === AttributeChangeOp.Set && (c.attribute === 'roles' || c.attribute === 'teams')
+            (c) => c.op === AttributeChangeOp.Set && (c.attribute === 'roles' || c.attribute === 'teams' || c.attribute === 'records')
         )
 
         let currentRoleIds: string[] = []
         let currentTeamIds: string[] = []
+        let currentRecordIds: string[] = []
+
+        await client.syncEnterprise()
+        await client.syncVault()
 
         if (needsCurrent) {
             const user = await client.getUser(email)
-            if (!user) {
-                throw new ConnectorError(
-                    `Keeper user with email "${email}" not found`,
-                    ConnectorErrorType.NotFound
-                )
-            }
-            currentRoleIds = user.roles ?? []
-            currentTeamIds = user.teams ?? []
+            const vaultTree = await client.listVaultTree()
+            currentRecordIds = getRecordListByEmail(email, vaultTree)
+            
         }
 
         // node is single-valued on the account schema and in Keeper. Reject
@@ -86,6 +85,8 @@ export function createAccountUpdateHandler(client: KeeperClient) {
         const removeRoles = new Set<string>()
         const addTeams = new Set<string>()
         const removeTeams = new Set<string>()
+        const addRecords = new Set<string>()
+        const removeRecords = new Set<string>()
 
         for (const change of changes) {
             switch (change.attribute) {
@@ -113,6 +114,11 @@ export function createAccountUpdateHandler(client: KeeperClient) {
                 case 'email':
                     rejectEmailChange(change, email)
                     break
+                case 'records':
+                    applyMultiValuedChange(change, addRecords, removeRecords, currentRecordIds)
+
+
+                    break
                 default:
                     if (READ_ONLY_ATTRS.has(change.attribute)) {
                         logger.warn(
@@ -132,6 +138,8 @@ export function createAccountUpdateHandler(client: KeeperClient) {
         opts.removeRoleValues = [...removeRoles]
         opts.addTeamValues = [...addTeams]
         opts.removeTeamValues = [...removeTeams]
+        opts.addRecordValues = [...addRecords]
+        opts.removeRecordValues = [...removeRecords]
 
         // If nothing translated into an actionable Commander flag (e.g., the
         // caller only touched read-only attributes, or a Set on roles turned
@@ -146,6 +154,7 @@ export function createAccountUpdateHandler(client: KeeperClient) {
         }
 
         logger.info(`Updating Keeper vault account ${email}`)
+
         await client.updateUser(opts)
 
         res.send(await fetchFreshAccount(client, email))
@@ -174,7 +183,9 @@ function hasActionableChange(opts: UpdateUserOptions): boolean {
         (opts.addRoleValues?.length ?? 0) > 0 ||
         (opts.removeRoleValues?.length ?? 0) > 0 ||
         (opts.addTeamValues?.length ?? 0) > 0 ||
-        (opts.removeTeamValues?.length ?? 0) > 0
+        (opts.removeTeamValues?.length ?? 0) > 0 ||
+        (opts.addRecordValues?.length ?? 0) > 0 ||
+        (opts.removeRecordValues?.length ?? 0) > 0
     )
 }
 
