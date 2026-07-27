@@ -16,7 +16,7 @@ import {
     toTeamEntitlement,
     toRecordEntitlement,
 } from '../utils/keeper-mappings'
-import { getManageableFolders, getRecordList } from '../utils/helper'
+import { getAllShareableFolders, getRecordList } from '../utils/helper'
 
 const SUPPORTED_TYPES = ['node', 'team', 'role', 'folder', 'record'] as const
 
@@ -51,9 +51,8 @@ export function createEntitlementListHandler(client: KeeperClient) {
             case 'team': {
                 const teams = await client.listTeams()
                 const nodes = await client.listNodes()
-                // Catalog folders only (whoami MU / OW) so team.folders match entitlement list
-                const whoami = await client.getWhoami()
-                const folders = getManageableFolders(vaultTree, whoami.user)
+                // All shareable folders so team.folders match entitlement list
+                const folders = getAllShareableFolders(vaultTree)
                 const nodePathToId = buildNodePathMap(nodes)
                 const teamUidToFolderIds = buildTeamFolderMap(folders)
                 logger.info(`Fetched ${teams.length} Keeper teams`)
@@ -85,9 +84,8 @@ export function createEntitlementListHandler(client: KeeperClient) {
                 return
             }
             case 'folder': {
-                // Catalog = whoami MU (classic) / OW (NSF); account maps use the same set
-                const whoami = await client.getWhoami()
-                const folders = getManageableFolders(vaultTree, whoami.user)
+                // All classic shared_folder / NSF nested_share_folder from vault tree
+                const folders = getAllShareableFolders(vaultTree)
                 let entitlementCount = 0
                 for (const folder of folders) {
                     for (const ent of toFolderEntitlements(folder)) {
@@ -96,7 +94,7 @@ export function createEntitlementListHandler(client: KeeperClient) {
                     }
                 }
                 logger.info(
-                    `Fetched ${folders.length} Keeper folders (whoami=${whoami.user}) → ` +
+                    `Fetched ${folders.length} Keeper folders → ` +
                         `${entitlementCount} folder entitlements (by permission)`
                 )
                 return

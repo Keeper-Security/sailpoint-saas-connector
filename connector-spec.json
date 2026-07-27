@@ -126,7 +126,7 @@
 			{
 				"name": "folders",
 				"type": "string",
-				"description": "Folder entitlements as <folderUid>:<permission> for whoami-catalog folders only (classic: whoami has MU; NSF: whoami has OW). Classic: NP|MU|MR|MUR. NSF: V|SM|CM|CSM|FM.",
+				"description": "Folder entitlements from the vault tree: classic shared folders and NSF folders as <folderUid>:<permission>; non-sharable plain folders as raw <folderUid>. Classic: NP|MU|MR|MUR. NSF: V|SM|CM|CSM|FM.",
 				"entitlement": true,
 				"managed": true,
 				"multi": true,
@@ -214,7 +214,7 @@
 				{
 					"name": "folders",
 					"type": "string",
-					"description": "Folder entitlements shared to this team as <folderUid>:<permission> for whoami-catalog folders only (classic MU / NSF OW). Classic: NP|MU|MR|MUR. NSF: V|SM|CM|CSM|FM.",
+					"description": "Folder entitlements from the vault tree: classic/NSF as <folderUid>:<permission>; non-sharable plain folders as raw <folderUid>. Classic: NP|MU|MR|MUR. NSF: V|SM|CM|CSM|FM.",
 					"multi": true,
 					"entitlement": true,
 					"schemaObjectType": "folder"
@@ -271,7 +271,7 @@
 				{
 					"name": "id",
 					"type": "string",
-					"description": "Folder entitlement id: <folderUid>:<permission>. Classic NP|MU|MR|MUR. NSF V|SM|CM|CSM|FM"
+					"description": "Folder entitlement id: <folderUid>:<permission> for classic/NSF, or raw folderUid for non-sharable. Classic NP|MU|MR|MUR. NSF V|SM|CM|CSM|FM"
 				},
 				{
 					"name": "uid",
@@ -281,7 +281,7 @@
 				{
 					"name": "name",
 					"type": "string",
-					"description": "Folder name with permission label, e.g. New Demo [Manage records]"
+					"description": "Folder name; sharable folders include permission label, e.g. New Demo [Manage records]"
 				},
 				{
 					"name": "path",
@@ -291,7 +291,7 @@
 				{
 					"name": "folderType",
 					"type": "string",
-					"description": "classic or nsf"
+					"description": "classic, nsf, or non-sharable"
 				},
 				{
 					"name": "parentId",
@@ -301,7 +301,7 @@
 				{
 					"name": "permission",
 					"type": "string",
-					"description": "Permission code. Classic: NP, MU, MR, MUR. NSF: V, SM, CM, CSM, FM"
+					"description": "Permission code for classic/NSF; absent for non-sharable. Classic: NP, MU, MR, MUR. NSF: V, SM, CM, CSM, FM"
 				},
 				{
 					"name": "permissionLabel",

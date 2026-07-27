@@ -13,6 +13,7 @@ import {
     buildTeamFolderMap,
     buildNodePathMap,
     toFolderEntitlement,
+    toNonSharableFolderEntitlement,
     toNodeEntitlement,
     toRoleEntitlement,
     toTeamEntitlement,
@@ -22,7 +23,7 @@ import {
     isValidPermission,
     parseFolderEntitlementId,
 } from '../utils/folder-permissions'
-import { getManageableFolders } from '../utils/helper'
+import { getAllShareableFolders } from '../utils/helper'
 
 const SUPPORTED_TYPES = ['node', 'team', 'role', 'folder'] as const
 
@@ -65,7 +66,7 @@ export function createEntitlementReadHandler(client: KeeperClient) {
             case 'team': {
                 const teams = await client.listTeams()
                 const nodes = await client.listNodes()
-                const folders = await client.listManageableFolders()
+                const folders = await client.listAllFolders()
                 const team = teams.find((t) => t.team_uid === identity)
                 if (!team) {
                     throw new ConnectorError(
@@ -100,21 +101,28 @@ export function createEntitlementReadHandler(client: KeeperClient) {
 
             case 'folder': {
                 const { uid, permission } = parseFolderEntitlementId(identity)
-                const [vaultTree, whoami] = await Promise.all([
-                    client.listVaultTree(),
-                    client.getWhoami(),
-                ])
-                const folders = getManageableFolders(vaultTree, whoami.user)
+                const vaultTree = await client.listVaultTree()
+                const folders = getAllShareableFolders(vaultTree)
                 const folder = folders.find((f) => f.uid === uid)
                 if (!folder) {
                     throw new ConnectorError(
-                        `Keeper folder with uid "${uid}" not found or not catalog-eligible (classic MU / NSF OW)`,
+                        `Keeper folder with uid "${uid}" not found`,
                         ConnectorErrorType.NotFound
                     )
                 }
-                if (!isValidPermission(folder.folderType, permission)) {
+                if (folder.folderType === 'non-sharable') {
+                    if (permission != null) {
+                        throw new ConnectorError(
+                            `Non-sharable folder id must be raw uid, got "${identity}"`,
+                            ConnectorErrorType.NotFound
+                        )
+                    }
+                    res.send(toNonSharableFolderEntitlement(folder))
+                    return
+                }
+                if (!permission || !isValidPermission(folder.folderType, permission)) {
                     throw new ConnectorError(
-                        `Invalid permission "${permission}" for folderType "${folder.folderType}" ` +
+                        `Invalid permission "${permission ?? ''}" for folderType "${folder.folderType}" ` +
                             `(id "${identity}")`,
                         ConnectorErrorType.NotFound
                     )
