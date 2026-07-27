@@ -250,3 +250,33 @@ export function canWhoamiManageFolder(folder: KeeperFolder, whoamiEmail: string)
     }
     return perms.some((p) => NSF_CATALOG_PERMS.has(p))
 }
+
+/**
+ * Normalize a scalar or array attribute into non-empty trimmed strings.
+ * ISC often wraps single-valued managed entitlements (e.g. `node`) as arrays.
+ */
+export function coerceNonEmptyStrings(value: unknown): string[] {
+    if (value == null) return []
+    const raw: unknown[] = Array.isArray(value) ? value : [value]
+    return raw.map((v) => (typeof v === 'string' ? v.trim() : '')).filter((v) => v !== '')
+}
+
+/**
+ * Keeper enterprise users belong to exactly one node. Accept a single id
+ * (string or one-element array) and reject empty / multiple values.
+ */
+export function requireSingleNodeId(
+    value: unknown,
+    emptyMessage = 'attribute "node" cannot be empty'
+): string {
+    const values = coerceNonEmptyStrings(value)
+    if (values.length === 0) {
+        throw new ConnectorError(emptyMessage)
+    }
+    if (values.length > 1) {
+        throw new ConnectorError(
+            `node is single-valued; expected one node id, got ${values.length}`
+        )
+    }
+    return values[0]
+}
