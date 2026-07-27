@@ -336,11 +336,17 @@ export class KeeperClient {
         for (const v of options.addRoleValues ?? []) parts.push(`--add-role "${this.escapeArg(v)}"`)
         for (const v of options.addTeamValues ?? []) parts.push(`--add-team "${this.escapeArg(v)}"`)
 
-        // if (parts.length === 1) {
-        //     throw new ConnectorError('updateUser called with no attributes to change')
-        // }
+        await this.updateRecord(options)
+
+        if (parts.length === 1) {
+            throw new ConnectorError('updateUser called with no attributes to change')
+        }
 
         await this.executeCommand(parts.join(' '))
+
+    }
+
+    private async updateRecord(options: UpdateUserOptions): Promise<void> {
         for (const v of options.addRecordValues ?? []) {
             await this.executeCommand(this.createRecordCommand(v, options.email)+' --action grant')
         }
@@ -348,9 +354,7 @@ export class KeeperClient {
         for (const v of options.removeRecordValues ?? []) {
             await this.executeCommand(this.createRecordCommand(v, options.email)+' --action revoke')
         }
-
     }
-
     private createRecordCommand(recordId: string, email: string): string {
 
         const assign_perm = recordId.split(':')[1]
@@ -363,6 +367,16 @@ export class KeeperClient {
                 case "CS":
                     return `share-record -e ${email} "${recordId.split(':')[0]}" --share`
                 
+                case "VW":
+                    return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r viewer`
+                case "SM":
+                    return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r share-manager`
+                case "FM":
+                    return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r full-manager`
+                case "CSM":
+                    return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r content-share-manager`
+                case "CM":
+                    return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r content-manager`
                 default:
                         throw new ConnectorError(`Invalid permission: ${assign_perm}`)
 
