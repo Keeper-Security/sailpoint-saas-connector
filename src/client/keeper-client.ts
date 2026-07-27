@@ -343,9 +343,9 @@ export class KeeperClient {
 
         await this.updateRecord(options)
 
-        if (parts.length === 1) {
-            throw new ConnectorError('updateUser called with no attributes to change')
-        }
+        // if (parts.length === 1) {
+        //     throw new ConnectorError('updateUser called with no attributes to change')
+        // }
 
         await this.executeCommand(parts.join(' '))
 
