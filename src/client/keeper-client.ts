@@ -19,14 +19,16 @@ const MAX_POLL_DELAY_MS = 5_000
 /**
  * Inputs for `KeeperClient.createUser`. Only `email` is required — every other
  * field is optional and will be omitted from the underlying Commander call if
- * left blank. `roleIds` and `teamUids` accept the stable IDs we hand out in
- * entitlement:list responses (role_id / team_uid).
+ * left blank. `addRoleValues` / `addTeamValues` accept the stable IDs we hand
+ * out in entitlement:list responses (role_id / team_uid).
  */
 export interface CreateUserOptions {
     email: string
     name?: string
     jobTitle?: string
     nodeId?: string
+    addRoleValues?: string[]
+    addTeamValues?: string[]
 }
 
 /**
@@ -306,6 +308,9 @@ export class KeeperClient {
         if (options.name) parts.push(`--name "${this.escapeArg(options.name)}"`)
         if (options.jobTitle) parts.push(`--job-title "${this.escapeArg(options.jobTitle)}"`)
         if (options.nodeId) parts.push(`--node "${this.escapeArg(options.nodeId)}"`)
+
+        for (const v of options.addRoleValues ?? []) parts.push(`--add-role "${this.escapeArg(v)}"`)
+        for (const v of options.addTeamValues ?? []) parts.push(`--add-team "${this.escapeArg(v)}"`)
 
         await this.executeCommand(parts.join(' '))
     }
