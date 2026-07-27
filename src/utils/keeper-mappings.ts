@@ -117,8 +117,8 @@ function addTeamFolderEntitlements(
 }
 
 /**
- * Account `folders` = uid:CODE for catalog folders only.
- * Callers must pass listManageableFolders() (classic MU / NSF OW).
+ * Account `folders` = uid:CODE for all shareable folders from the vault tree.
+ * Callers must pass listAllFolders() / getAllShareableFolders().
  */
 export function buildAccountMaps(folders: KeeperFolder[]): AccountMaps {
     const userEmailToFolderIds = new Map<string, string[]>()
@@ -142,7 +142,7 @@ export function buildRecordMaps(records: KeeperRecord[]): RecordMaps {
     return { userEmailToRecordIds }
 }
 
-/** Team `folders` = uid:CODE for catalog folders only. */
+/** Team `folders` = uid:CODE for all shareable folders from the vault tree. */
 export function buildTeamFolderMap(folders: KeeperFolder[]): Map<string, string[]> {
     const teamUidToFolderIds = new Map<string, string[]>()
     for (const folder of folders) {
@@ -272,7 +272,7 @@ export function toAccount(user: KeeperUser, maps: AccountMaps, recordMaps: Recor
 }
 
 /**
- * One SailPoint folder entitlement = folder UID + permission code.
+ * Sharable folder entitlement = folder UID + permission code.
  * Classic: NP|MU|MR|MUR. NSF: V|SM|CM|CSM|FM.
  */
 export function toFolderEntitlement(folder: KeeperFolder, permission: FolderPermission): StdEntitlementListOutput {
@@ -296,7 +296,33 @@ export function toFolderEntitlement(folder: KeeperFolder, permission: FolderPerm
     }
 }
 
-/** Expand one Keeper folder into all permission entitlements for its type. */
+/** Non-sharable plain vault folder — one entitlement, identity = raw uid. */
+export function toNonSharableFolderEntitlement(folder: KeeperFolder): StdEntitlementListOutput {
+    const id = folder.uid
+    const baseName = (folder.name || folder.path || folder.uid)?.trim()
+    return {
+        identity: id,
+        uuid: id,
+        type: 'folder',
+        attributes: {
+            id,
+            uid: folder.uid,
+            name: baseName,
+            path: folder.path || folder.name || folder.uid,
+            folderType: 'non-sharable',
+            parentId: folder.parentId ?? null,
+            permission: null,
+            permissionLabel: null,
+        },
+    }
+}
+
+/** Expand one Keeper folder into entitlement(s) for its type. */
 export function toFolderEntitlements(folder: KeeperFolder): StdEntitlementListOutput[] {
-    return permissionsForFolderType(folder.folderType).map((permission) => toFolderEntitlement(folder, permission))
+    if (folder.folderType === 'non-sharable') {
+        return [toNonSharableFolderEntitlement(folder)]
+    }
+    return permissionsForFolderType(folder.folderType).map((permission) =>
+        toFolderEntitlement(folder, permission)
+    )
 }

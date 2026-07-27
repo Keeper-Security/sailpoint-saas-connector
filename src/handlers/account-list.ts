@@ -22,7 +22,7 @@ export function createAccountListHandler(client: KeeperClient) {
         logger.info('Synced vault')
         const whoami = await client.getWhoami()
         const vaultTree = await client.listVaultTree();
-        const folders = await client.listManageableFolders()
+        const folders = await client.listAllFolders()
         const records = getRecordList(vaultTree,whoami) 
 
         const maps = buildAccountMaps(folders)

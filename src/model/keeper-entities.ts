@@ -85,7 +85,7 @@ export interface KeeperRecord {
     users?: string[]
 }
 
-export type KeeperFolderType = 'classic' | 'nsf'
+export type KeeperFolderType = 'classic' | 'nsf' | 'non-sharable'
 
 export interface KeeperFolder {
     uid: string

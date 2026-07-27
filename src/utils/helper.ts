@@ -131,12 +131,6 @@ export function getRecordList(_vaultTree: KeeperVaultTreeData, _whoami: WhoamiIn
     return sail_entitlements
 }
 
-/** Classic: whoami must have MU to include folder in catalog / membership. */
-const CLASSIC_CATALOG_PERMS = new Set(['MU'])
-
-/** NSF: whoami must have OW (Owner) to include folder in catalog / membership. */
-const NSF_CATALOG_PERMS = new Set(['OW'])
-
 const CONTAINER_KINDS = new Set(['shared_folder', 'folder', 'nested_share_folder'])
 
 function normalizeEmail(email: string): string {
@@ -155,28 +149,10 @@ function teamsOnNode(node: KeeperVaultTreeNode): KeeperShareTeam[] {
     return sp.teams
 }
 
-function whoamiPermsOnFolder(node: KeeperVaultTreeNode, whoamiEmail: string): string[] {
-    const me = normalizeEmail(whoamiEmail)
-    const entry = usersOnNode(node).find((u) => normalizeEmail(u.email) === me)
-    return entry?.permissions ?? []
-}
-
-function isCatalogFolder(node: KeeperVaultTreeNode, whoamiEmail: string): boolean {
-    const perms = whoamiPermsOnFolder(node, whoamiEmail)
-    if (perms.length === 0) return false
-
-    if (node.kind === 'shared_folder') {
-        return perms.some((p) => CLASSIC_CATALOG_PERMS.has(p))
-    }
-    if (node.kind === 'nested_share_folder') {
-        return perms.some((p) => NSF_CATALOG_PERMS.has(p))
-    }
-    return false
-}
-
 function folderTypeForKind(kind: string): KeeperFolderType | null {
     if (kind === 'shared_folder') return 'classic'
     if (kind === 'nested_share_folder') return 'nsf'
+    if (kind === 'folder') return 'non-sharable'
     return null
 }
 
@@ -213,25 +189,20 @@ function toKeeperFolder(node: KeeperVaultTreeNode, parentId: string | undefined,
 }
 
 /**
- * Walk the vault tree and collect catalog folders only
- * (classic: whoami has MU; NSF: whoami has OW).
+ * Walk the vault tree and collect classic shared_folder, NSF nested_share_folder,
+ * and plain vault `folder` nodes (non-sharable, one entitlement each).
  */
-function collectFolders(
+function collectShareableFolders(
     nodes: KeeperVaultTreeNode[],
     parentId: string | undefined,
     out: KeeperFolder[],
-    seen: Set<string>,
-    whoamiEmail: string
+    seen: Set<string>
 ): void {
     for (const node of nodes) {
         const uid = node.uid?.trim()
         const folderType = folderTypeForKind(node.kind)
 
-        const include =
-            !!folderType &&
-            !!uid &&
-            !seen.has(uid) &&
-            isCatalogFolder(node, whoamiEmail)
+        const include = !!folderType && !!uid && !seen.has(uid)
 
         if (include && folderType && uid) {
             seen.add(uid)
@@ -240,40 +211,20 @@ function collectFolders(
 
         // Always walk children so nested shared_folder / nested_share_folder are found
         if (CONTAINER_KINDS.has(node.kind) && node.children?.length) {
-            collectFolders(node.children, uid || parentId, out, seen, whoamiEmail)
+            collectShareableFolders(node.children, uid || parentId, out, seen)
         }
     }
 }
 
 /**
- * Whoami catalog folders: classic shared_folder if whoami has MU;
- * NSF nested_share_folder if whoami has OW.
- * Used for entitlement aggregation and account/team folder membership.
+ * All folder nodes from the vault tree: classic, NSF, and non-sharable plain folders.
+ * No whoami permission filter — Commander enforces share rights on grant/remove.
  */
-export function getManageableFolders(vaultTree: KeeperVaultTreeData, whoamiEmail: string): KeeperFolder[] {
-    if (!whoamiEmail?.trim()) {
-        throw new ConnectorError(
-            'whoami returned empty user; cannot filter manageable folders'
-        )
-    }
+export function getAllShareableFolders(vaultTree: KeeperVaultTreeData): KeeperFolder[] {
     const children = vaultTree.tree?.children ?? []
     const out: KeeperFolder[] = []
-    collectFolders(children, undefined, out, new Set(), whoamiEmail)
+    collectShareableFolders(children, undefined, out, new Set())
     return out
-}
-
-/**
- * Whether whoami may grant/remove shares on this folder.
- * Same rule as catalog: classic MU; NSF OW.
- */
-export function canWhoamiManageFolder(folder: KeeperFolder, whoamiEmail: string): boolean {
-    if (!whoamiEmail?.trim()) return false
-    const perms = folder.userPermissions?.[normalizeEmail(whoamiEmail)] ?? []
-    if (perms.length === 0) return false
-    if (folder.folderType === 'classic') {
-        return perms.some((p) => CLASSIC_CATALOG_PERMS.has(p))
-    }
-    return perms.some((p) => NSF_CATALOG_PERMS.has(p))
 }
 
 /**

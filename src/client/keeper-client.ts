@@ -5,7 +5,7 @@ import { SourceConfig } from '../model/config'
 import { KeeperNode, KeeperRole, KeeperTeam, KeeperUser, KeeperRecord, KeeperFolder, KeeperVaultTreeData } from '../model/keeper-entities'
 import { handleAPIErrorResponse } from '../utils/api-error'
 import { requireConfigValue } from '../utils/errors'
-import { getManageableFolders } from '../utils/helper'
+import { getAllShareableFolders } from '../utils/helper'
 
 const USER_COLUMNS = 'name,status,transfer_status,node,team_count,teams,role_count,roles,alias,2fa_enabled,job_title'
 const TEAM_COLUMNS = 'restricts,node,user_count,users,queued_user_count,queued_users,role_count,roles'
@@ -445,12 +445,53 @@ export class KeeperClient {
     }
 
     /**
-     * Whoami catalog folders (classic MU; NSF OW).
+     * All classic/NSF shareable folders from the vault tree (no whoami filter).
      * Used for entitlement aggregation and account/team folder attributes.
      */
-    async listManageableFolders(): Promise<KeeperFolder[]> {
-        const [vaultTree, whoami] = await Promise.all([this.listVaultTree(), this.getWhoami()])
-        return getManageableFolders(vaultTree, whoami.user)
+    async listAllFolders(): Promise<KeeperFolder[]> {
+        const vaultTree = await this.listVaultTree()
+        return getAllShareableFolders(vaultTree)
+    }
+
+    /** Grant classic shared-folder access (`share-folder -a grant`). */
+    async grantClassicFolderShare(
+        folderUid: string,
+        email: string,
+        manageUsers: 'on' | 'off',
+        manageRecords: 'on' | 'off'
+    ): Promise<void> {
+        const { safe: safeEmail } = this.normalizeEmailArg(email, 'grantClassicFolderShare')
+        const safeUid = this.escapeArg(folderUid.trim())
+        await this.executeCommand(
+            `share-folder -a grant -e "${safeEmail}" -o ${manageUsers} -p ${manageRecords} "${safeUid}"`
+        )
+    }
+
+    /** Revoke classic shared-folder access (`share-folder -a remove -f`). */
+    async removeClassicFolderShare(folderUid: string, email: string): Promise<void> {
+        const { safe: safeEmail } = this.normalizeEmailArg(email, 'removeClassicFolderShare')
+        const safeUid = this.escapeArg(folderUid.trim())
+        await this.executeCommand(
+            `share-folder -a remove -e "${safeEmail}" -f "${safeUid}"`
+        )
+    }
+
+    /** Grant NSF folder access (`nsf-share-folder -a grant -r <role>`). */
+    async grantNsfFolderShare(folderUid: string, email: string, role: string): Promise<void> {
+        const { safe: safeEmail } = this.normalizeEmailArg(email, 'grantNsfFolderShare')
+        const safeUid = this.escapeArg(folderUid.trim())
+        await this.executeCommand(
+            `nsf-share-folder -a grant -e "${safeEmail}" -r ${role} "${safeUid}"`
+        )
+    }
+
+    /** Revoke NSF folder access (`nsf-share-folder -a remove`). */
+    async removeNsfFolderShare(folderUid: string, email: string): Promise<void> {
+        const { safe: safeEmail } = this.normalizeEmailArg(email, 'removeNsfFolderShare')
+        const safeUid = this.escapeArg(folderUid.trim())
+        await this.executeCommand(
+            `nsf-share-folder -a remove -e "${safeEmail}" "${safeUid}"`
+        )
     }
 
     /**
