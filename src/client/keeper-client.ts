@@ -1,4 +1,4 @@
-import { ConnectorError } from '@sailpoint/connector-sdk'
+import { ConnectorError, logger } from '@sailpoint/connector-sdk'
 import axios from 'axios'
 import { RequestResultResponse, SubmitRequestResponse } from '../model/service-mode-api'
 import { SourceConfig } from '../model/config'
@@ -341,17 +341,16 @@ export class KeeperClient {
         for (const v of options.addRoleValues ?? []) parts.push(`--add-role "${this.escapeArg(v)}"`)
         for (const v of options.addTeamValues ?? []) parts.push(`--add-team "${this.escapeArg(v)}"`)
 
-        await this.updateRecord(options)
-
-        // if (parts.length === 1) {
-        //     throw new ConnectorError('updateUser called with no attributes to change')
-        // }
+        if (parts.length === 1) {
+            logger.info(`updateUser called with no attributes to change for ${options.email} skipping teams and roles updates.`)
+            return
+        }
 
         await this.executeCommand(parts.join(' '))
 
     }
 
-    private async updateRecord(options: UpdateUserOptions): Promise<void> {
+    async updateRecordPermissions(options: UpdateUserOptions): Promise<void> {
         for (const v of options.addRecordValues ?? []) {
             await this.executeCommand(this.createRecordCommand(v, options.email)+' --action grant')
         }
