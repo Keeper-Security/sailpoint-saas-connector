@@ -9,7 +9,7 @@ import {
 } from '@sailpoint/connector-sdk'
 import { CreateUserOptions, KeeperClient } from '../client/keeper-client'
 import { buildAccountMaps, buildRecordMaps, toAccount } from '../utils/keeper-mappings'
-import { getRecordList, requireSingleNodeId } from '../utils/helper'
+import { getRecordList, coerceNonEmptyStrings, requireSingleNodeId } from '../utils/helper'
 
 export function createAccountCreateHandler(client: KeeperClient) {
     return async (
@@ -50,17 +50,25 @@ export function createAccountCreateHandler(client: KeeperClient) {
         // Only forward attributes we actually know how to set on Keeper. Every
         // other attribute (userId, status, twoFactorEnabled, aliases, nodePath)
         // is either server-controlled or a display-only mirror of the node
-        // entitlement.
+        // entitlement. roles / teams are optional — ISC may include them when
+        // create is driven by a Role/AP that also grants those entitlements.
+        const addRoleValues = coerceNonEmptyStrings(attrs.roles)
+        const addTeamValues = coerceNonEmptyStrings(attrs.teams)
+
         const createOptions: CreateUserOptions = {
             email,
             name,
             jobTitle: firstEntitlementValue(attrs.jobTitle),
             nodeId,
+            ...(addRoleValues.length > 0 ? { addRoleValues } : {}),
+            ...(addTeamValues.length > 0 ? { addTeamValues } : {}),
         }
 
         logger.info(
             `Creating Keeper vault account for "${email}" ` +
-                `(name=${createOptions.name ?? '-'}), in node "${createOptions.nodeId ?? '-'}"`
+                `(name=${createOptions.name ?? '-'}), in node "${createOptions.nodeId ?? '-'}"` +
+                `, roles=[${addRoleValues.join(',') || '-'}]` +
+                `, teams=[${addTeamValues.join(',') || '-'}]`
         )
         await client.createUser(createOptions)
 

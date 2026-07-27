@@ -88,11 +88,14 @@ export function createAccountUpdateHandler(client: KeeperClient) {
 
         // node is single-valued on the account schema and in Keeper. Reject
         // plans that try to assign more than one node (e.g. multiple nodes in
-        // an Access Profile) before we mutate anything.
-        const nodeChanges = changes.filter((c) => c.attribute === 'node')
-        if (nodeChanges.length > 1) {
+        // an Access Profile). Remove ops are ignored later — a user must stay
+        // in a node; ISC deprovisioning from a Role/AP often emits Remove.
+        const nodeAssignChanges = changes.filter(
+            (c) => c.attribute === 'node' && c.op !== AttributeChangeOp.Remove
+        )
+        if (nodeAssignChanges.length > 1) {
             throw new ConnectorError(
-                `node is single-valued; expected at most one "node" change, got ${nodeChanges.length}`
+                `node is single-valued; expected at most one "node" change, got ${nodeAssignChanges.length}`
             )
         }
 
@@ -300,14 +303,18 @@ function applyRequiredStringChange(
 }
 
 /**
- * Keeper enterprise users belong to exactly one node. Reject Remove; otherwise
- * validate a single id via requireSingleNodeId (shared with account-create).
+ * Keeper enterprise users belong to exactly one node.
+ * - Remove (typical Role/AP deprovision): skip — cannot leave a user nodeless;
+ *   move them with Set/Add instead.
+ * - Set/Add: validate a single id via requireSingleNodeId (shared with create).
  */
 function applyNodeChange(change: AttributeChange, assign: (value: string) => void): void {
     if (change.op === AttributeChangeOp.Remove) {
-        throw new ConnectorError(
-            'cannot Remove required attribute "node"; use Set with a new value instead'
+        logger.info(
+            'std:account:update ignoring Remove on "node" — Keeper users must remain in a node; ' +
+                'use Set with a new node id to move the user'
         )
+        return
     }
     assign(
         requireSingleNodeId(change.value, 'std:account:update attribute "node" cannot be empty')
