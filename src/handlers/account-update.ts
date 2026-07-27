@@ -12,7 +12,7 @@ import {
 } from '@sailpoint/connector-sdk'
 import { KeeperClient, UpdateUserOptions } from '../client/keeper-client'
 import { buildAccountMaps, buildRecordMaps, toAccount } from '../utils/keeper-mappings'
-import { getRecordList } from '../utils/helper'
+import { getRecordList, coerceNonEmptyStrings, requireSingleNodeId } from '../utils/helper'
 
 /**
  * Attributes exposed on the account schema that this handler intentionally
@@ -69,6 +69,16 @@ export function createAccountUpdateHandler(client: KeeperClient) {
             currentTeamIds = user.teams ?? []
         }
 
+        // node is single-valued on the account schema and in Keeper. Reject
+        // plans that try to assign more than one node (e.g. multiple nodes in
+        // an Access Profile) before we mutate anything.
+        const nodeChanges = changes.filter((c) => c.attribute === 'node')
+        if (nodeChanges.length > 1) {
+            throw new ConnectorError(
+                `node is single-valued; expected at most one "node" change, got ${nodeChanges.length}`
+            )
+        }
+
         // Aggregate every change into a single UpdateUserOptions payload so
         // Commander sees the whole update as one atomic invocation.
         const opts: UpdateUserOptions = { email }
@@ -90,7 +100,7 @@ export function createAccountUpdateHandler(client: KeeperClient) {
                     })
                     break
                 case 'node':
-                    applyRequiredStringChange(change, 'node', (v) => {
+                    applyNodeChange(change, (v) => {
                         opts.nodeId = v
                     })
                     break
@@ -185,6 +195,21 @@ function applyRequiredStringChange(
     assign(value)
 }
 
+/**
+ * Keeper enterprise users belong to exactly one node. Reject Remove; otherwise
+ * validate a single id via requireSingleNodeId (shared with account-create).
+ */
+function applyNodeChange(change: AttributeChange, assign: (value: string) => void): void {
+    if (change.op === AttributeChangeOp.Remove) {
+        throw new ConnectorError(
+            'cannot Remove required attribute "node"; use Set with a new value instead'
+        )
+    }
+    assign(
+        requireSingleNodeId(change.value, 'std:account:update attribute "node" cannot be empty')
+    )
+}
+
 function applyOptionalStringChange(change: AttributeChange, assign: (value: string) => void): void {
     if (change.op === AttributeChangeOp.Remove) {
         // Commander clears optional string fields when passed an empty value.
@@ -206,7 +231,7 @@ function applyMultiValuedChange(
     removes: Set<string>,
     currentIds: string[]
 ): void {
-    const values = coerceStringArray(change.value)
+    const values = coerceNonEmptyStrings(change.value)
 
     switch (change.op) {
         case AttributeChangeOp.Add:
@@ -258,10 +283,4 @@ function normalizeString(value: unknown): string | undefined {
     if (typeof value !== 'string') return undefined
     const trimmed = value.trim()
     return trimmed === '' ? undefined : trimmed
-}
-
-function coerceStringArray(value: unknown): string[] {
-    if (value == null) return []
-    const raw: unknown[] = Array.isArray(value) ? value : [value]
-    return raw.map((v) => (typeof v === 'string' ? v.trim() : '')).filter((v) => v !== '')
 }

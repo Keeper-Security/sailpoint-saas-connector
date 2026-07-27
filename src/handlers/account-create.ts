@@ -9,7 +9,7 @@ import {
 } from '@sailpoint/connector-sdk'
 import { CreateUserOptions, KeeperClient } from '../client/keeper-client'
 import { buildAccountMaps, buildRecordMaps, toAccount } from '../utils/keeper-mappings'
-import { getRecordList } from '../utils/helper'
+import { getRecordList, requireSingleNodeId } from '../utils/helper'
 
 export function createAccountCreateHandler(client: KeeperClient) {
     return async (
@@ -39,15 +39,13 @@ export function createAccountCreateHandler(client: KeeperClient) {
         }
 
         // `node` is a managed entitlement, so ISC delivers it as an array
-        // (e.g. ["70411693850651"]) even though it is single-valued. Accept both
-        // the array shape (ISC access requests) and a scalar (Postman/API callers).
-        const nodeId = firstEntitlementValue(attrs.node)
-        if (!nodeId) {
-            throw new ConnectorError(
-                `std:account:create for "${email}" is missing required attribute "node" ` +
-                    `(the node_id of the Keeper enterprise node to place the user in).`
-            )
-        }
+        // (e.g. ["70411693850651"]) even though it is single-valued. Accept a
+        // scalar or a one-element array; reject multiple node ids explicitly.
+        const nodeId = requireSingleNodeId(
+            attrs.node,
+            `std:account:create for "${email}" is missing required attribute "node" ` +
+                `(the node_id of the Keeper enterprise node to place the user in).`
+        )
 
         // Only forward attributes we actually know how to set on Keeper. Every
         // other attribute (userId, status, twoFactorEnabled, aliases, nodePath)
