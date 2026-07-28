@@ -69,8 +69,7 @@ export function createEntitlementListHandler(client: KeeperClient) {
                 return
             }
             case 'record': {
-                const whoami = await client.getWhoami()
-                const records = getRecordList(vaultTree, whoami)
+                const records = getRecordList(vaultTree)
 
                 for (const record of records) {
                     res.send(toRecordEntitlement(record))

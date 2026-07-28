@@ -2,7 +2,6 @@ import {
     ConnectorError,
     ConnectorErrorType,
     Context,
-    KeyID,
     logger,
     Response,
     StdEntitlementReadInput,
@@ -20,6 +19,7 @@ import {
 } from '../utils/keeper-mappings'
 import { FolderPermission, isValidPermission, parseFolderEntitlementId } from '../utils/folder-permissions'
 import { getAllShareableFolders } from '../utils/helper'
+import { safeKeyId } from '../utils/identity'
 
 const SUPPORTED_TYPES = ['node', 'team', 'role', 'folder'] as const
 
@@ -115,15 +115,5 @@ export function createEntitlementReadHandler(client: KeeperClient) {
                     `Unsupported entitlement type "${type}"; expected one of: ${SUPPORTED_TYPES.join(', ')}`
                 )
         }
-    }
-}
-
-/** Returns the key's simple id if present, else null. KeyID throws on missing keys. */
-function safeKeyId(input: StdEntitlementReadInput): string | null {
-    if (!input?.key) return null
-    try {
-        return KeyID({ key: input.key })
-    } catch {
-        return null
     }
 }

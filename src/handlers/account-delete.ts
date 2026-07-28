@@ -1,13 +1,13 @@
 import {
     ConnectorError,
     Context,
-    KeyID,
     logger,
     Response,
     StdAccountDeleteInput,
     StdAccountDeleteOutput,
 } from '@sailpoint/connector-sdk'
 import { KeeperClient } from '../client/keeper-client'
+import { resolveAccountEmail } from '../utils/identity'
 
 /**
  * Handler for `std:account:delete`.
@@ -30,10 +30,7 @@ export function createAccountDeleteHandler(client: KeeperClient) {
         input: StdAccountDeleteInput,
         res: Response<StdAccountDeleteOutput>
     ): Promise<void> => {
-        const email = safeKeyId(input) ?? input?.identity
-        if (!email) {
-            throw new ConnectorError('std:account:delete called without an identity')
-        }
+        const email = resolveAccountEmail(input, 'std:account:delete')
 
         logger.info(`Attempting to delete Keeper vault account ${email}`)
 
@@ -57,15 +54,5 @@ export function createAccountDeleteHandler(client: KeeperClient) {
         logger.info(`Deleted Keeper vault account ${email}`)
 
         res.send({})
-    }
-}
-
-/** Returns the key's simple id if present, else null. `KeyID` throws on missing keys. */
-function safeKeyId(input: StdAccountDeleteInput): string | null {
-    if (!input?.key) return null
-    try {
-        return KeyID({ key: input.key })
-    } catch {
-        return null
     }
 }

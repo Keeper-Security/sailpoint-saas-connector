@@ -1,16 +1,13 @@
 import {
-    ConnectorError,
-    ConnectorErrorType,
     Context,
-    KeyID,
     logger,
     Response,
     StdAccountReadInput,
     StdAccountReadOutput,
 } from '@sailpoint/connector-sdk'
 import { KeeperClient } from '../client/keeper-client'
-import { buildAccountMaps, buildRecordMaps, toAccount } from '../utils/keeper-mappings'
-import { getRecordList } from '../utils/helper'
+import { loadAccountView } from '../utils/account-view'
+import { resolveAccountEmail } from '../utils/identity'
 
 export function createAccountReadHandler(client: KeeperClient) {
     return async (
@@ -18,12 +15,7 @@ export function createAccountReadHandler(client: KeeperClient) {
         input: StdAccountReadInput,
         res: Response<StdAccountReadOutput>
     ): Promise<void> => {
-        // Accounts use email as the identity, which lives in either `key.simple.id`
-        // (strict schema value from ISC) or `input.identity` (local test tools).
-        const email = safeKeyId(input) ?? input?.identity
-        if (!email) {
-            throw new ConnectorError('std:account:read called without an identity')
-        }
+        const email = resolveAccountEmail(input, 'std:account:read')
 
         logger.info(`Reading Keeper vault account ${email}`)
 
@@ -32,24 +24,6 @@ export function createAccountReadHandler(client: KeeperClient) {
         await client.syncVault()
         logger.info('Synced vault')
 
-        const user = await client.getUser(email)
-        const folders = await client.listAllFolders()
-        const records = getRecordList(await client.listVaultTree(), await client.getWhoami())
-
-        if (!user) {
-            throw new ConnectorError(`Keeper user with email "${email}" not found`, ConnectorErrorType.NotFound)
-        }
-
-        res.send(toAccount(user, buildAccountMaps(folders), buildRecordMaps(records)))
-    }
-}
-
-/** Returns the key's simple id if present, else null. KeyID throws on missing keys. */
-function safeKeyId(input: StdAccountReadInput): string | null {
-    if (!input?.key) return null
-    try {
-        return KeyID({ key: input.key })
-    } catch {
-        return null
+        res.send(await loadAccountView(client, email))
     }
 }
