@@ -13,7 +13,7 @@ import {
 import { KeeperClient, UpdateUserOptions } from '../client/keeper-client'
 import { KeeperFolder } from '../model/keeper-entities'
 import { buildAccountMaps, buildRecordMaps, toAccount } from '../utils/keeper-mappings'
-import { getRecordList, coerceNonEmptyStrings, requireSingleNodeId, getRecordListByEmail  } from '../utils/helper'
+import { getRecordList, coerceNonEmptyStrings, requireSingleNodeId, getRecordListByEmail } from '../utils/helper'
 import {
     ClassicPermission,
     NsfPermission,
@@ -60,35 +60,33 @@ export function createAccountUpdateHandler(client: KeeperClient) {
         const needsCurrentRolesOrTeams = changes.some(
             (c) => c.op === AttributeChangeOp.Set && (c.attribute === 'roles' || c.attribute === 'teams')
         )
-        const needsCurrentFolders = changes.some(
-            (c) => c.op === AttributeChangeOp.Set && c.attribute === 'folders'
-        )
+        const needsCurrentFolders = changes.some((c) => c.op === AttributeChangeOp.Set && c.attribute === 'folders')
 
-        const needsCurrentRecords = changes.some(
-            (c) => c.op === AttributeChangeOp.Set && c.attribute === 'records'
-        )
+        const needsCurrentRecords = changes.some((c) => c.op === AttributeChangeOp.Set && c.attribute === 'records')
 
         let currentRoleIds: string[] = []
         let currentTeamIds: string[] = []
+        let currentFolderIds: string[] = []
         let currentRecordIds: string[] = []
 
         await client.syncEnterprise()
         await client.syncVault()
-        let currentFolderIds: string[] = []
 
         if (needsCurrentRolesOrTeams) {
             const user = await client.getUser(email)
-
-            
+            if (!user) {
+                throw new ConnectorError(`Keeper user with email "${email}" not found`, ConnectorErrorType.NotFound)
+            }
+            currentRoleIds = user.roles ?? []
+            currentTeamIds = user.teams ?? []
         }
 
         if (needsCurrentFolders) {
             const folders = await client.listAllFolders()
-            currentFolderIds =
-                buildAccountMaps(folders).userEmailToFolderIds.get(email.toLowerCase()) ?? []
+            currentFolderIds = buildAccountMaps(folders).userEmailToFolderIds.get(email.toLowerCase()) ?? []
         }
 
-        if(needsCurrentRecords) {
+        if (needsCurrentRecords) {
             const vaultTree = await client.listVaultTree()
             currentRecordIds = getRecordListByEmail(email, vaultTree)
         }
@@ -97,9 +95,7 @@ export function createAccountUpdateHandler(client: KeeperClient) {
         // plans that try to assign more than one node (e.g. multiple nodes in
         // an Access Profile). Remove ops are ignored later — a user must stay
         // in a node; ISC deprovisioning from a Role/AP often emits Remove.
-        const nodeAssignChanges = changes.filter(
-            (c) => c.attribute === 'node' && c.op !== AttributeChangeOp.Remove
-        )
+        const nodeAssignChanges = changes.filter((c) => c.attribute === 'node' && c.op !== AttributeChangeOp.Remove)
         if (nodeAssignChanges.length > 1) {
             throw new ConnectorError(
                 `node is single-valued; expected at most one "node" change, got ${nodeAssignChanges.length}`
@@ -150,7 +146,6 @@ export function createAccountUpdateHandler(client: KeeperClient) {
                 case 'records':
                     applyMultiValuedChange(change, addRecords, removeRecords, currentRecordIds)
 
-
                     break
                 default:
                     if (READ_ONLY_ATTRS.has(change.attribute)) {
@@ -182,9 +177,7 @@ export function createAccountUpdateHandler(client: KeeperClient) {
         // into a zero-length diff), skip the mutation but still respond with
         // the current account state so ISC sees a successful "no-op" update.
         if (!hasActionableChange(opts) && !folderWork && !recordWork) {
-            logger.info(
-                `std:account:update for "${email}" produced no actionable changes; returning current state`
-            )
+            logger.info(`std:account:update for "${email}" produced no actionable changes; returning current state`)
             res.send(await fetchFreshAccount(client, email))
             return
         }
@@ -199,7 +192,7 @@ export function createAccountUpdateHandler(client: KeeperClient) {
             await applyFolderChanges(client, email, [...addFolders], [...removeFolders])
         }
 
-        if(recordWork) {
+        if (recordWork) {
             logger.info(`Updating Keeper record permissions for ${email}`)
             await client.updateRecordPermissions(opts)
             logger.info(`Keeper record permissions updated for ${email}`)
@@ -242,9 +235,7 @@ async function applyFolderChanges(
             )
         }
         if (folder.folderType === 'non-sharable') {
-            throw new ConnectorError(
-                `cannot remove share from non-sharable folder "${uid}"`
-            )
+            throw new ConnectorError(`cannot remove share from non-sharable folder "${uid}"`)
         }
         logger.info(`Removing folder share ${uid} from ${email} (${folder.folderType})`)
         if (folder.folderType === 'classic') {
@@ -264,14 +255,10 @@ async function applyFolderChanges(
             )
         }
         if (folder.folderType === 'non-sharable') {
-            throw new ConnectorError(
-                `cannot grant share on non-sharable folder "${uid}"`
-            )
+            throw new ConnectorError(`cannot grant share on non-sharable folder "${uid}"`)
         }
         if (!permission || !isValidPermission(folder.folderType, permission)) {
-            throw new ConnectorError(
-                `invalid folder entitlement "${id}" for folderType "${folder.folderType}"`
-            )
+            throw new ConnectorError(`invalid folder entitlement "${id}" for folderType "${folder.folderType}"`)
         }
         logger.info(`Granting folder share ${id} to ${email} (${folder.folderType})`)
         if (folder.folderType === 'classic') {
@@ -311,15 +298,9 @@ function hasActionableChange(opts: UpdateUserOptions): boolean {
     )
 }
 
-function applyRequiredStringChange(
-    change: AttributeChange,
-    label: string,
-    assign: (value: string) => void
-): void {
+function applyRequiredStringChange(change: AttributeChange, label: string, assign: (value: string) => void): void {
     if (change.op === AttributeChangeOp.Remove) {
-        throw new ConnectorError(
-            `cannot Remove required attribute "${label}"; use Set with a new value instead`
-        )
+        throw new ConnectorError(`cannot Remove required attribute "${label}"; use Set with a new value instead`)
     }
     const value = normalizeString(change.value)
     if (!value) {
@@ -342,9 +323,7 @@ function applyNodeChange(change: AttributeChange, assign: (value: string) => voi
         )
         return
     }
-    assign(
-        requireSingleNodeId(change.value, 'std:account:update attribute "node" cannot be empty')
-    )
+    assign(requireSingleNodeId(change.value, 'std:account:update attribute "node" cannot be empty'))
 }
 
 function applyOptionalStringChange(change: AttributeChange, assign: (value: string) => void): void {
@@ -402,9 +381,7 @@ function rejectEmailChange(change: AttributeChange, currentEmail: string): void 
             return
         }
     }
-    throw new ConnectorError(
-        'cannot change "email" via std:account:update; email is the account identity'
-    )
+    throw new ConnectorError('cannot change "email" via std:account:update; email is the account identity')
 }
 
 function safeKeyId(input: StdAccountUpdateInput): string | null {
