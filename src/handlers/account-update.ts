@@ -13,7 +13,7 @@ import {
 import { KeeperClient, UpdateUserOptions } from '../client/keeper-client'
 import { KeeperFolder } from '../model/keeper-entities'
 import { buildAccountMaps, buildRecordMaps, toAccount } from '../utils/keeper-mappings'
-import { getRecordList, coerceNonEmptyStrings, requireSingleNodeId, getRecordListByEmail  } from '../utils/helper'
+import { getRecordList, coerceNonEmptyStrings, requireSingleNodeId } from '../utils/helper'
 import {
     ClassicPermission,
     NsfPermission,
@@ -64,33 +64,26 @@ export function createAccountUpdateHandler(client: KeeperClient) {
             (c) => c.op === AttributeChangeOp.Set && c.attribute === 'folders'
         )
 
-        const needsCurrentRecords = changes.some(
-            (c) => c.op === AttributeChangeOp.Set && c.attribute === 'records'
-        )
-
         let currentRoleIds: string[] = []
         let currentTeamIds: string[] = []
-        let currentRecordIds: string[] = []
-
-        await client.syncEnterprise()
-        await client.syncVault()
         let currentFolderIds: string[] = []
 
         if (needsCurrentRolesOrTeams) {
             const user = await client.getUser(email)
-
-            
+            if (!user) {
+                throw new ConnectorError(
+                    `Keeper user with email "${email}" not found`,
+                    ConnectorErrorType.NotFound
+                )
+            }
+            currentRoleIds = user.roles ?? []
+            currentTeamIds = user.teams ?? []
         }
 
         if (needsCurrentFolders) {
             const folders = await client.listAllFolders()
             currentFolderIds =
                 buildAccountMaps(folders).userEmailToFolderIds.get(email.toLowerCase()) ?? []
-        }
-
-        if(needsCurrentRecords) {
-            const vaultTree = await client.listVaultTree()
-            currentRecordIds = getRecordListByEmail(email, vaultTree)
         }
 
         // node is single-valued on the account schema and in Keeper. Reject
@@ -113,8 +106,6 @@ export function createAccountUpdateHandler(client: KeeperClient) {
         const removeRoles = new Set<string>()
         const addTeams = new Set<string>()
         const removeTeams = new Set<string>()
-        const addRecords = new Set<string>()
-        const removeRecords = new Set<string>()
         const addFolders = new Set<string>()
         const removeFolders = new Set<string>()
 
@@ -147,11 +138,6 @@ export function createAccountUpdateHandler(client: KeeperClient) {
                 case 'email':
                     rejectEmailChange(change, email)
                     break
-                case 'records':
-                    applyMultiValuedChange(change, addRecords, removeRecords, currentRecordIds)
-
-
-                    break
                 default:
                     if (READ_ONLY_ATTRS.has(change.attribute)) {
                         logger.warn(
@@ -171,17 +157,14 @@ export function createAccountUpdateHandler(client: KeeperClient) {
         opts.removeRoleValues = [...removeRoles]
         opts.addTeamValues = [...addTeams]
         opts.removeTeamValues = [...removeTeams]
-        opts.addRecordValues = [...addRecords]
-        opts.removeRecordValues = [...removeRecords]
 
         const folderWork = addFolders.size > 0 || removeFolders.size > 0
-        const recordWork = addRecords.size > 0 || removeRecords.size > 0
 
         // If nothing translated into an actionable Commander flag (e.g., the
         // caller only touched read-only attributes, or a Set on roles turned
         // into a zero-length diff), skip the mutation but still respond with
         // the current account state so ISC sees a successful "no-op" update.
-        if (!hasActionableChange(opts) && !folderWork && !recordWork) {
+        if (!hasActionableChange(opts) && !folderWork) {
             logger.info(
                 `std:account:update for "${email}" produced no actionable changes; returning current state`
             )
@@ -190,19 +173,12 @@ export function createAccountUpdateHandler(client: KeeperClient) {
         }
 
         logger.info(`Updating Keeper vault account ${email}`)
-
         if (hasActionableChange(opts)) {
             await client.updateUser(opts)
         }
 
         if (folderWork) {
             await applyFolderChanges(client, email, [...addFolders], [...removeFolders])
-        }
-
-        if(recordWork) {
-            logger.info(`Updating Keeper record permissions for ${email}`)
-            await client.updateRecordPermissions(opts)
-            logger.info(`Keeper record permissions updated for ${email}`)
         }
 
         res.send(await fetchFreshAccount(client, email))
@@ -305,9 +281,7 @@ function hasActionableChange(opts: UpdateUserOptions): boolean {
         (opts.addRoleValues?.length ?? 0) > 0 ||
         (opts.removeRoleValues?.length ?? 0) > 0 ||
         (opts.addTeamValues?.length ?? 0) > 0 ||
-        (opts.removeTeamValues?.length ?? 0) > 0 ||
-        (opts.addRecordValues?.length ?? 0) > 0 ||
-        (opts.removeRecordValues?.length ?? 0) > 0
+        (opts.removeTeamValues?.length ?? 0) > 0
     )
 }
 

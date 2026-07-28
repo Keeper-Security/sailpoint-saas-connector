@@ -1,4 +1,4 @@
-import { ConnectorError, logger } from '@sailpoint/connector-sdk'
+import { ConnectorError } from '@sailpoint/connector-sdk'
 import axios from 'axios'
 import { RequestResultResponse, SubmitRequestResponse } from '../model/service-mode-api'
 import { SourceConfig } from '../model/config'
@@ -61,8 +61,6 @@ export interface UpdateUserOptions {
     removeRoleValues?: string[]
     addTeamValues?: string[]
     removeTeamValues?: string[]
-    addRecordValues?: string[]
-    removeRecordValues?: string[]
 }
 
 function sleep(ms: number): Promise<void> {
@@ -342,52 +340,10 @@ export class KeeperClient {
         for (const v of options.addTeamValues ?? []) parts.push(`--add-team "${this.escapeArg(v)}"`)
 
         if (parts.length === 1) {
-            logger.info(`updateUser called with no attributes to change for ${options.email} skipping teams and roles updates.`)
-            return
+            throw new ConnectorError('updateUser called with no attributes to change')
         }
 
         await this.executeCommand(parts.join(' '))
-
-    }
-
-    async updateRecordPermissions(options: UpdateUserOptions): Promise<void> {
-        for (const v of options.addRecordValues ?? []) {
-            await this.executeCommand(this.createRecordCommand(v, options.email)+' --action grant')
-        }
-
-        for (const v of options.removeRecordValues ?? []) {
-            await this.executeCommand(this.createRecordCommand(v, options.email)+' --action revoke')
-        }
-    }
-    private createRecordCommand(recordId: string, email: string): string {
-
-        const assign_perm = recordId.split(':')[1]
-
-            switch (assign_perm) {
-                case "RO":
-                    return `share-record -e ${email} "${recordId.split(':')[0]}"`
-                case "CE":
-                    return `share-record -e ${email} "${recordId.split(':')[0]}" --write`
-                case "CS":
-                    return `share-record -e ${email} "${recordId.split(':')[0]}" --share`
-                
-                case "VW":
-                    return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r viewer`
-                case "SM":
-                    return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r share-manager`
-                case "FM":
-                    return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r full-manager`
-                case "CSM":
-                    return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r content-share-manager`
-                case "CM":
-                    return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r content-manager`
-                case "OW":
-                    throw new ConnectorError(`Ownership change is restricted. Please perform this action on Keeper Vault.`)
-                default:
-                        throw new ConnectorError(`Invalid permission: ${assign_perm}`)
-
-        }
-
     }
 
     /**
