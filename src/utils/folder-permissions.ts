@@ -5,7 +5,7 @@ export const CLASSIC_PERMISSIONS = ['NP', 'MU', 'MR', 'MUR'] as const
 export type ClassicPermission = (typeof CLASSIC_PERMISSIONS)[number]
 
 /** NSF: nsf-share-folder -r roles (short codes). */
-export const NSF_PERMISSIONS = ['V', 'SM', 'CM', 'CSM', 'FM'] as const
+export const NSF_PERMISSIONS = ['VW', 'SM', 'CM', 'CSM', 'FM'] as const
 export type NsfPermission = (typeof NSF_PERMISSIONS)[number]
 
 export type FolderPermission = ClassicPermission | NsfPermission
@@ -18,7 +18,7 @@ export const CLASSIC_PERMISSION_LABELS: Record<ClassicPermission, string> = {
 }
 
 export const NSF_PERMISSION_LABELS: Record<NsfPermission, string> = {
-    V: 'Viewer',
+    VW: 'Viewer',
     SM: 'Share manager',
     CM: 'Content manager',
     CSM: 'Content share manager',
@@ -63,9 +63,10 @@ export function isValidPermission(folderType: KeeperFolderType, permission: stri
 }
 
 /** Classic share-folder -o / -p from NP|MU|MR|MUR. */
-export function classicFlags(
-    permission: ClassicPermission
-): { manageUsers: 'on' | 'off'; manageRecords: 'on' | 'off' } {
+export function classicFlags(permission: ClassicPermission): {
+    manageUsers: 'on' | 'off'
+    manageRecords: 'on' | 'off'
+} {
     switch (permission) {
         case 'NP':
             return { manageUsers: 'off', manageRecords: 'off' }
@@ -81,7 +82,7 @@ export function classicFlags(
 /** NSF code → Commander -r value (for provisioning later). */
 export function nsfRoleForCode(code: NsfPermission): string {
     const map: Record<NsfPermission, string> = {
-        V: 'viewer',
+        VW: 'viewer',
         SM: 'share-manager',
         CM: 'content-manager',
         CSM: 'content-share-manager',
@@ -105,7 +106,7 @@ export function classicEntitlementFromTreePerms(perms: string[]): ClassicPermiss
 
 /**
  * Map NSF tree ACL codes (VW, SM, CM, CSM, FM, OW, CT, …) to a connector entitlement code.
- * Highest role wins when multiple are present. OW → FM; CT → V (closest existing code).
+ * Highest role wins when multiple are present. OW → FM; CT → VW (closest existing code).
  */
 export function nsfEntitlementFromTreePerms(perms: string[]): NsfPermission | null {
     const set = new Set(perms)
@@ -113,15 +114,12 @@ export function nsfEntitlementFromTreePerms(perms: string[]): NsfPermission | nu
     if (set.has('CSM')) return 'CSM'
     if (set.has('CM')) return 'CM'
     if (set.has('SM')) return 'SM'
-    if (set.has('VW') || set.has('CT')) return 'V'
+    if (set.has('VW') || set.has('CT')) return 'VW'
     return null
 }
 
 /** Resolve account/team folder membership id (`uid:CODE`) from tree ACL for one user. */
-export function folderEntitlementIdFromTreePerms(
-    folder: KeeperFolder,
-    treePerms: string[]
-): string | null {
+export function folderEntitlementIdFromTreePerms(folder: KeeperFolder, treePerms: string[]): string | null {
     if (folder.folderType === 'non-sharable') return null
     if (folder.folderType === 'classic') {
         return toFolderEntitlementId(folder.uid, classicEntitlementFromTreePerms(treePerms))

@@ -30,7 +30,7 @@ export function createAccountDisableHandler(client: KeeperClient) {
         // flag and the updated Keeper status (Locked).
         const user = await client.getUser(email)
         const folders = await client.listAllFolders()
-        const records = getRecordList(await client.listVaultTree(),await client.getWhoami()) 
+        const records = getRecordList(await client.listVaultTree(), await client.getWhoami())
 
         if (!user) {
             throw new ConnectorError(

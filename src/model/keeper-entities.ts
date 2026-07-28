@@ -80,7 +80,7 @@ export interface KeeperRecord {
     title: string
     record_category: string
     type: string
-    path:string
+    path: string
     permission: string
     users?: string[]
 }
@@ -159,4 +159,3 @@ export interface KeeperVaultTreeData {
     share_permissions_key: KeeperSharePermissionsKey
     tree: KeeperVaultTreeNode
 }
-

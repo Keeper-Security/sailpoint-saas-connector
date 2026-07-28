@@ -1,10 +1,4 @@
-import {
-    Context,
-    logger,
-    Response,
-    StdAccountListInput,
-    StdAccountListOutput,
-} from '@sailpoint/connector-sdk'
+import { Context, logger, Response, StdAccountListInput, StdAccountListOutput } from '@sailpoint/connector-sdk'
 import { KeeperClient } from '../client/keeper-client'
 import { buildAccountMaps, buildRecordMaps, toAccount } from '../utils/keeper-mappings'
 import { getRecordList } from '../utils/helper'
@@ -16,14 +10,17 @@ export function createAccountListHandler(client: KeeperClient) {
         res: Response<StdAccountListOutput>
     ): Promise<void> => {
         logger.info('Listing Keeper vault accounts')
+
         await client.syncEnterprise()
         logger.info('Synced enterprise')
+
         await client.syncVault()
         logger.info('Synced vault')
+
         const whoami = await client.getWhoami()
-        const vaultTree = await client.listVaultTree();
+        const vaultTree = await client.listVaultTree()
         const folders = await client.listAllFolders()
-        const records = getRecordList(vaultTree,whoami) 
+        const records = getRecordList(vaultTree, whoami)
 
         const maps = buildAccountMaps(folders)
         const recordMaps = buildRecordMaps(records)

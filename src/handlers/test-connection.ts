@@ -1,10 +1,4 @@
-import {
-    Context,
-    logger,
-    Response,
-    StdTestConnectionInput,
-    StdTestConnectionOutput,
-} from '@sailpoint/connector-sdk'
+import { Context, logger, Response, StdTestConnectionInput, StdTestConnectionOutput } from '@sailpoint/connector-sdk'
 import { KeeperClient } from '../client/keeper-client'
 
 export function createTestConnectionHandler(client: KeeperClient) {

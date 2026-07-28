@@ -2,7 +2,15 @@ import { ConnectorError, logger } from '@sailpoint/connector-sdk'
 import axios from 'axios'
 import { RequestResultResponse, SubmitRequestResponse } from '../model/service-mode-api'
 import { SourceConfig } from '../model/config'
-import { KeeperNode, KeeperRole, KeeperTeam, KeeperUser, KeeperRecord, KeeperFolder, KeeperVaultTreeData } from '../model/keeper-entities'
+import {
+    KeeperNode,
+    KeeperRole,
+    KeeperTeam,
+    KeeperUser,
+    KeeperRecord,
+    KeeperFolder,
+    KeeperVaultTreeData,
+} from '../model/keeper-entities'
 import { handleAPIErrorResponse } from '../utils/api-error'
 import { requireConfigValue } from '../utils/errors'
 import { getAllShareableFolders } from '../utils/helper'
@@ -119,9 +127,7 @@ export class KeeperClient {
      * beforehand when they need fresh local Commander state — this method
      * never syncs implicitly.
      */
-    private async executeCommand(
-        command: string,
-    ): Promise<RequestResultResponse> {
+    private async executeCommand(command: string): Promise<RequestResultResponse> {
         return this.runCommand(command)
     }
 
@@ -342,52 +348,50 @@ export class KeeperClient {
         for (const v of options.addTeamValues ?? []) parts.push(`--add-team "${this.escapeArg(v)}"`)
 
         if (parts.length === 1) {
-            logger.info(`updateUser called with no attributes to change for ${options.email} skipping teams and roles updates.`)
+            logger.info(
+                `updateUser called with no attributes to change for ${options.email} skipping teams and roles updates.`
+            )
             return
         }
 
         await this.executeCommand(parts.join(' '))
-
     }
 
     async updateRecordPermissions(options: UpdateUserOptions): Promise<void> {
         for (const v of options.addRecordValues ?? []) {
-            await this.executeCommand(this.createRecordCommand(v, options.email)+' --action grant')
+            await this.executeCommand(this.createRecordCommand(v, options.email) + ' --action grant')
         }
 
         for (const v of options.removeRecordValues ?? []) {
-            await this.executeCommand(this.createRecordCommand(v, options.email)+' --action revoke')
+            await this.executeCommand(this.createRecordCommand(v, options.email) + ' --action revoke')
         }
     }
     private createRecordCommand(recordId: string, email: string): string {
-
         const assign_perm = recordId.split(':')[1]
 
-            switch (assign_perm) {
-                case "RO":
-                    return `share-record -e ${email} "${recordId.split(':')[0]}"`
-                case "CE":
-                    return `share-record -e ${email} "${recordId.split(':')[0]}" --write`
-                case "CS":
-                    return `share-record -e ${email} "${recordId.split(':')[0]}" --share`
-                
-                case "VW":
-                    return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r viewer`
-                case "SM":
-                    return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r share-manager`
-                case "FM":
-                    return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r full-manager`
-                case "CSM":
-                    return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r content-share-manager`
-                case "CM":
-                    return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r content-manager`
-                case "OW":
-                    throw new ConnectorError(`Ownership change is restricted. Please perform this action on Keeper Vault.`)
-                default:
-                        throw new ConnectorError(`Invalid permission: ${assign_perm}`)
+        switch (assign_perm) {
+            case 'RO':
+                return `share-record -e ${email} "${recordId.split(':')[0]}"`
+            case 'CE':
+                return `share-record -e ${email} "${recordId.split(':')[0]}" --write`
+            case 'CS':
+                return `share-record -e ${email} "${recordId.split(':')[0]}" --share`
 
+            case 'VW':
+                return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r viewer`
+            case 'SM':
+                return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r share-manager`
+            case 'FM':
+                return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r full-manager`
+            case 'CSM':
+                return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r content-share-manager`
+            case 'CM':
+                return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r content-manager`
+            case 'OW':
+                throw new ConnectorError(`Ownership change is restricted. Please perform this action on Keeper Vault.`)
+            default:
+                throw new ConnectorError(`Invalid permission: ${assign_perm}`)
         }
-
     }
 
     /**
@@ -417,11 +421,11 @@ export class KeeperClient {
         return value.replace(/"/g, '\\"')
     }
 
-    async syncEnterprise(): Promise<void>{
+    async syncEnterprise(): Promise<void> {
         await this.runCommand('enterprise-down -f')
     }
 
-    async syncVault(): Promise<void>{
+    async syncVault(): Promise<void> {
         await this.runCommand('sync-down -f')
     }
 
@@ -472,27 +476,21 @@ export class KeeperClient {
     async removeClassicFolderShare(folderUid: string, email: string): Promise<void> {
         const { safe: safeEmail } = this.normalizeEmailArg(email, 'removeClassicFolderShare')
         const safeUid = this.escapeArg(folderUid.trim())
-        await this.executeCommand(
-            `share-folder -a remove -e "${safeEmail}" -f "${safeUid}"`
-        )
+        await this.executeCommand(`share-folder -a remove -e "${safeEmail}" -f "${safeUid}"`)
     }
 
     /** Grant NSF folder access (`nsf-share-folder -a grant -r <role>`). */
     async grantNsfFolderShare(folderUid: string, email: string, role: string): Promise<void> {
         const { safe: safeEmail } = this.normalizeEmailArg(email, 'grantNsfFolderShare')
         const safeUid = this.escapeArg(folderUid.trim())
-        await this.executeCommand(
-            `nsf-share-folder -a grant -e "${safeEmail}" -r ${role} "${safeUid}"`
-        )
+        await this.executeCommand(`nsf-share-folder -a grant -e "${safeEmail}" -r ${role} "${safeUid}"`)
     }
 
     /** Revoke NSF folder access (`nsf-share-folder -a remove`). */
     async removeNsfFolderShare(folderUid: string, email: string): Promise<void> {
         const { safe: safeEmail } = this.normalizeEmailArg(email, 'removeNsfFolderShare')
         const safeUid = this.escapeArg(folderUid.trim())
-        await this.executeCommand(
-            `nsf-share-folder -a remove -e "${safeEmail}" "${safeUid}"`
-        )
+        await this.executeCommand(`nsf-share-folder -a remove -e "${safeEmail}" "${safeUid}"`)
     }
 
     /**
@@ -549,7 +547,9 @@ export class KeeperClient {
                     return parsed as T
                 }
                 throw new ConnectorError(
-                    `Keeper ${kind} response parsed but is not an object (got ${Array.isArray(parsed) ? 'array' : typeof parsed})`
+                    `Keeper ${kind} response parsed but is not an object (got ${
+                        Array.isArray(parsed) ? 'array' : typeof parsed
+                    })`
                 )
             } catch (err) {
                 if (err instanceof ConnectorError) {

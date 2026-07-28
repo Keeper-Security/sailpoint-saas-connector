@@ -7,6 +7,9 @@ import {
     KeyID,
     logger,
     Response,
+    Result,
+    ResultMessageLevel,
+    ResultStatus,
     StdAccountUpdateInput,
     StdAccountUpdateOutput,
 } from '@sailpoint/connector-sdk'
@@ -27,9 +30,44 @@ import {
  * Attributes exposed on the account schema that this handler intentionally
  * does not mutate. Keeper controls their values, so any op targeting them is
  * logged and skipped rather than failing the whole update. `email` is handled
- * separately (below) because it's the identity, not a plain read-only field.
+ * separately because it's the identity, not a plain read-only field.
  */
 const READ_ONLY_ATTRS = new Set(['userId', 'status', 'accountStatus', 'twoFactorEnabled', 'aliases'])
+
+/** Add/remove ID sets for one multi-valued entitlement attribute. */
+interface MembershipDelta {
+    adds: Set<string>
+    removes: Set<string>
+}
+
+interface UpdatePlan {
+    opts: UpdateUserOptions
+    roles: MembershipDelta
+    teams: MembershipDelta
+    folders: MembershipDelta
+    records: MembershipDelta
+}
+
+interface CurrentMemberships {
+    roleIds: string[]
+    teamIds: string[]
+    folderIds: string[]
+    recordIds: string[]
+}
+
+/**
+ * One failed unit of work during an update. Independent folder/record ops are
+ * collected rather than aborting the whole plan, then reported together.
+ */
+interface OperationFailure {
+    /** Account schema attribute (e.g. folders, records, name). */
+    attribute: string
+    /** Short action label for the aggregated error message. */
+    action: string
+    /** Target entitlement id / description. */
+    target: string
+    message: string
+}
 
 export function createAccountUpdateHandler(client: KeeperClient) {
     return async (
@@ -37,11 +75,7 @@ export function createAccountUpdateHandler(client: KeeperClient) {
         input: StdAccountUpdateInput,
         res: Response<StdAccountUpdateOutput>
     ): Promise<void> => {
-        const email = safeKeyId(input) ?? input?.identity
-        if (!email) {
-            throw new ConnectorError('std:account:update called without an identity')
-        }
-
+        const email = resolveEmail(input)
         const changes = input?.changes ?? []
 
         // ISC occasionally issues an update with no changes (e.g., a bulk edit
@@ -53,157 +87,279 @@ export function createAccountUpdateHandler(client: KeeperClient) {
             return
         }
 
-        // Set on a multi-valued entitlement means "make membership exactly
-        // match this list", which we implement as a diff against the current
-        // membership. Teams/roles come from getUser; folders come from vault
-        // tree ACL maps (not on the enterprise user record).
-        const needsCurrentRolesOrTeams = changes.some(
-            (c) => c.op === AttributeChangeOp.Set && (c.attribute === 'roles' || c.attribute === 'teams')
-        )
-        const needsCurrentFolders = changes.some((c) => c.op === AttributeChangeOp.Set && c.attribute === 'folders')
-
-        const needsCurrentRecords = changes.some((c) => c.op === AttributeChangeOp.Set && c.attribute === 'records')
-
-        let currentRoleIds: string[] = []
-        let currentTeamIds: string[] = []
-        let currentFolderIds: string[] = []
-        let currentRecordIds: string[] = []
+        assertAtMostOneNodeAssign(changes)
 
         await client.syncEnterprise()
         await client.syncVault()
 
-        if (needsCurrentRolesOrTeams) {
-            const user = await client.getUser(email)
-            if (!user) {
-                throw new ConnectorError(`Keeper user with email "${email}" not found`, ConnectorErrorType.NotFound)
-            }
-            currentRoleIds = user.roles ?? []
-            currentTeamIds = user.teams ?? []
-        }
+        const current = await loadCurrentMemberships(client, email, changes)
+        const plan = buildUpdatePlan(email, changes, current)
 
-        if (needsCurrentFolders) {
-            const folders = await client.listAllFolders()
-            currentFolderIds = buildAccountMaps(folders).userEmailToFolderIds.get(email.toLowerCase()) ?? []
-        }
-
-        if (needsCurrentRecords) {
-            const vaultTree = await client.listVaultTree()
-            currentRecordIds = getRecordListByEmail(email, vaultTree)
-        }
-
-        // node is single-valued on the account schema and in Keeper. Reject
-        // plans that try to assign more than one node (e.g. multiple nodes in
-        // an Access Profile). Remove ops are ignored later — a user must stay
-        // in a node; ISC deprovisioning from a Role/AP often emits Remove.
-        const nodeAssignChanges = changes.filter((c) => c.attribute === 'node' && c.op !== AttributeChangeOp.Remove)
-        if (nodeAssignChanges.length > 1) {
-            throw new ConnectorError(
-                `node is single-valued; expected at most one "node" change, got ${nodeAssignChanges.length}`
-            )
-        }
-
-        // Aggregate every change into a single UpdateUserOptions payload so
-        // Commander sees the whole update as one atomic invocation.
-        const opts: UpdateUserOptions = { email }
-        const addRoles = new Set<string>()
-        const removeRoles = new Set<string>()
-        const addTeams = new Set<string>()
-        const removeTeams = new Set<string>()
-        const addRecords = new Set<string>()
-        const removeRecords = new Set<string>()
-        const addFolders = new Set<string>()
-        const removeFolders = new Set<string>()
-
-        for (const change of changes) {
-            switch (change.attribute) {
-                case 'name':
-                    applyRequiredStringChange(change, 'name', (v) => {
-                        opts.name = v
-                    })
-                    break
-                case 'jobTitle':
-                    applyOptionalStringChange(change, (v) => {
-                        opts.jobTitle = v
-                    })
-                    break
-                case 'node':
-                    applyNodeChange(change, (v) => {
-                        opts.nodeId = v
-                    })
-                    break
-                case 'roles':
-                    applyMultiValuedChange(change, addRoles, removeRoles, currentRoleIds)
-                    break
-                case 'teams':
-                    applyMultiValuedChange(change, addTeams, removeTeams, currentTeamIds)
-                    break
-                case 'folders':
-                    applyMultiValuedChange(change, addFolders, removeFolders, currentFolderIds)
-                    break
-                case 'email':
-                    rejectEmailChange(change, email)
-                    break
-                case 'records':
-                    applyMultiValuedChange(change, addRecords, removeRecords, currentRecordIds)
-
-                    break
-                default:
-                    if (READ_ONLY_ATTRS.has(change.attribute)) {
-                        logger.warn(
-                            `std:account:update ignoring read-only attribute "${change.attribute}" ` +
-                                `(op=${change.op}) for ${email}`
-                        )
-                    } else {
-                        logger.warn(
-                            `std:account:update ignoring unknown attribute "${change.attribute}" ` +
-                                `(op=${change.op}) for ${email}`
-                        )
-                    }
-            }
-        }
-
-        opts.addRoleValues = [...addRoles]
-        opts.removeRoleValues = [...removeRoles]
-        opts.addTeamValues = [...addTeams]
-        opts.removeTeamValues = [...removeTeams]
-        opts.addRecordValues = [...addRecords]
-        opts.removeRecordValues = [...removeRecords]
-
-        const folderWork = addFolders.size > 0 || removeFolders.size > 0
-        const recordWork = addRecords.size > 0 || removeRecords.size > 0
-
-        // If nothing translated into an actionable Commander flag (e.g., the
-        // caller only touched read-only attributes, or a Set on roles turned
-        // into a zero-length diff), skip the mutation but still respond with
-        // the current account state so ISC sees a successful "no-op" update.
-        if (!hasActionableChange(opts) && !folderWork && !recordWork) {
+        if (!hasWork(plan)) {
             logger.info(`std:account:update for "${email}" produced no actionable changes; returning current state`)
             res.send(await fetchFreshAccount(client, email))
             return
         }
 
         logger.info(`Updating Keeper vault account ${email}`)
+        const failures = await applyUpdatePlan(client, email, plan)
+        const account = await fetchFreshAccount(client, email)
 
-        if (hasActionableChange(opts)) {
-            await client.updateUser(opts)
+        if (failures.length === 0) {
+            res.send(account)
+            return
         }
 
-        if (folderWork) {
-            await applyFolderChanges(client, email, [...addFolders], [...removeFolders])
-        }
+        // Partial success: return the post-update account (successful ops are
+        // already applied) plus per-attribute results, then fail the command
+        // with one aggregated message so ISC surfaces every failure.
+        const message = formatAggregatedError(email, failures)
+        logger.error(message)
+        res.send({
+            ...account,
+            results: toAttributeResults(failures),
+        })
+        throw new ConnectorError(message)
+    }
+}
 
-        if (recordWork) {
-            logger.info(`Updating Keeper record permissions for ${email}`)
-            await client.updateRecordPermissions(opts)
-            logger.info(`Keeper record permissions updated for ${email}`)
-        }
+function resolveEmail(input: StdAccountUpdateInput): string {
+    const email = safeKeyId(input) ?? input?.identity
+    if (!email) {
+        throw new ConnectorError('std:account:update called without an identity')
+    }
+    return email
+}
 
-        res.send(await fetchFreshAccount(client, email))
+/**
+ * node is single-valued on the account schema and in Keeper. Reject plans that
+ * try to assign more than one node (e.g. multiple nodes in an Access Profile).
+ * Remove ops are ignored later — a user must stay in a node.
+ */
+function assertAtMostOneNodeAssign(changes: AttributeChange[]): void {
+    const nodeAssignChanges = changes.filter((c) => c.attribute === 'node' && c.op !== AttributeChangeOp.Remove)
+    if (nodeAssignChanges.length > 1) {
+        throw new ConnectorError(
+            `node is single-valued; expected at most one "node" change, got ${nodeAssignChanges.length}`
+        )
     }
 }
 
 /**
- * Grant/remove classic and NSF folder shares. Non-sharable folders are rejected.
+ * Load only the current memberships needed for Set-diff on multi-valued attrs.
+ * Teams/roles come from getUser; folders/records come from vault tree maps.
+ */
+async function loadCurrentMemberships(
+    client: KeeperClient,
+    email: string,
+    changes: AttributeChange[]
+): Promise<CurrentMemberships> {
+    const needsRolesOrTeams = changes.some(
+        (c) => c.op === AttributeChangeOp.Set && (c.attribute === 'roles' || c.attribute === 'teams')
+    )
+    const needsFolders = changes.some((c) => c.op === AttributeChangeOp.Set && c.attribute === 'folders')
+    const needsRecords = changes.some((c) => c.op === AttributeChangeOp.Set && c.attribute === 'records')
+
+    const current: CurrentMemberships = {
+        roleIds: [],
+        teamIds: [],
+        folderIds: [],
+        recordIds: [],
+    }
+
+    if (needsRolesOrTeams) {
+        const user = await client.getUser(email)
+        if (!user) {
+            throw new ConnectorError(`Keeper user with email "${email}" not found`, ConnectorErrorType.NotFound)
+        }
+        current.roleIds = user.roles ?? []
+        current.teamIds = user.teams ?? []
+    }
+
+    if (needsFolders) {
+        const folders = await client.listAllFolders()
+        current.folderIds = buildAccountMaps(folders).userEmailToFolderIds.get(email.toLowerCase()) ?? []
+    }
+
+    if (needsRecords) {
+        const vaultTree = await client.listVaultTree()
+        current.recordIds = getRecordListByEmail(email, vaultTree)
+    }
+
+    return current
+}
+
+/** Translate ISC attribute changes into Commander-ready deltas. */
+function buildUpdatePlan(email: string, changes: AttributeChange[], current: CurrentMemberships): UpdatePlan {
+    const plan: UpdatePlan = {
+        opts: { email },
+        roles: emptyDelta(),
+        teams: emptyDelta(),
+        folders: emptyDelta(),
+        records: emptyDelta(),
+    }
+
+    for (const change of changes) {
+        switch (change.attribute) {
+            case 'name':
+                applyRequiredStringChange(change, 'name', (v) => {
+                    plan.opts.name = v
+                })
+                break
+            case 'jobTitle':
+                applyOptionalStringChange(change, (v) => {
+                    plan.opts.jobTitle = v
+                })
+                break
+            case 'node':
+                applyNodeChange(change, (v) => {
+                    plan.opts.nodeId = v
+                })
+                break
+            case 'roles':
+                applyMultiValuedChange(change, plan.roles, current.roleIds)
+                break
+            case 'teams':
+                applyMultiValuedChange(change, plan.teams, current.teamIds)
+                break
+            case 'folders':
+                applyMultiValuedChange(change, plan.folders, current.folderIds)
+                break
+            case 'records':
+                applyMultiValuedChange(change, plan.records, current.recordIds)
+                break
+            case 'email':
+                rejectEmailChange(change, email)
+                break
+            default:
+                warnSkippedAttribute(change, email)
+        }
+    }
+
+    return plan
+}
+
+/**
+ * Diff a multi-valued entitlement change into `adds` / `removes`.
+ * Both `currentIds` and ISC-supplied values are stable IDs, so Set-diff
+ * needs no catalog lookup.
+ */
+function applyMultiValuedChange(change: AttributeChange, delta: MembershipDelta, currentIds: string[]): void {
+    const values = coerceNonEmptyStrings(change.value)
+
+    switch (change.op) {
+        case AttributeChangeOp.Add:
+            for (const v of values) delta.adds.add(v)
+            return
+        case AttributeChangeOp.Remove:
+            for (const v of values) delta.removes.add(v)
+            return
+        case AttributeChangeOp.Set: {
+            const desired = new Set(values)
+            const current = new Set(currentIds)
+            for (const id of desired) {
+                if (!current.has(id)) delta.adds.add(id)
+            }
+            for (const id of current) {
+                if (!desired.has(id)) delta.removes.add(id)
+            }
+            return
+        }
+    }
+}
+
+async function applyUpdatePlan(client: KeeperClient, email: string, plan: UpdatePlan): Promise<OperationFailure[]> {
+    const failures: OperationFailure[] = []
+
+    // Profile / roles / teams — one Commander call. On failure, still continue
+    // with independent folder/record ops so one enterprise-user error does not
+    // skip the rest of the plan.
+    const userOpts = toUserUpdateOptions(plan)
+    if (hasUserMutation(userOpts)) {
+        try {
+            await client.updateUser(userOpts)
+        } catch (err) {
+            failures.push({
+                attribute: primaryUserMutationAttribute(userOpts),
+                action: 'update user profile/roles/teams',
+                target: email,
+                message: errorMessage(err),
+            })
+            logger.warn(`User profile/roles/teams update failed for ${email}: ${errorMessage(err)}`)
+        }
+    }
+
+    if (hasDeltaWork(plan.folders)) {
+        failures.push(...(await applyFolderChanges(client, email, [...plan.folders.adds], [...plan.folders.removes])))
+    }
+
+    if (hasDeltaWork(plan.records)) {
+        logger.info(`Updating Keeper record permissions for ${email}`)
+        failures.push(...(await applyRecordChanges(client, email, [...plan.records.adds], [...plan.records.removes])))
+        logger.info(`Finished Keeper record permission updates for ${email}`)
+    }
+
+    return failures
+}
+
+/** Pick a schema attribute for Result reporting when enterprise-user fails. */
+function primaryUserMutationAttribute(opts: UpdateUserOptions): string {
+    if (opts.name !== undefined) return 'name'
+    if (opts.jobTitle !== undefined) return 'jobTitle'
+    if (opts.nodeId !== undefined) return 'node'
+    if ((opts.addRoleValues?.length ?? 0) > 0 || (opts.removeRoleValues?.length ?? 0) > 0) return 'roles'
+    return 'teams'
+}
+
+function toUserUpdateOptions(plan: UpdatePlan): UpdateUserOptions {
+    return {
+        ...plan.opts,
+        addRoleValues: [...plan.roles.adds],
+        removeRoleValues: [...plan.roles.removes],
+        addTeamValues: [...plan.teams.adds],
+        removeTeamValues: [...plan.teams.removes],
+    }
+}
+
+function hasWork(plan: UpdatePlan): boolean {
+    return (
+        hasUserMutation(toUserUpdateOptions(plan)) ||
+        hasDeltaWork(plan.folders) ||
+        hasDeltaWork(plan.records)
+    )
+}
+
+/** True when enterprise-user flags (profile / roles / teams) need to run. */
+function hasUserMutation(opts: UpdateUserOptions): boolean {
+    return (
+        opts.name !== undefined ||
+        opts.jobTitle !== undefined ||
+        opts.nodeId !== undefined ||
+        (opts.addRoleValues?.length ?? 0) > 0 ||
+        (opts.removeRoleValues?.length ?? 0) > 0 ||
+        (opts.addTeamValues?.length ?? 0) > 0 ||
+        (opts.removeTeamValues?.length ?? 0) > 0
+    )
+}
+
+function hasDeltaWork(delta: MembershipDelta): boolean {
+    return delta.adds.size > 0 || delta.removes.size > 0
+}
+
+function emptyDelta(): MembershipDelta {
+    return { adds: new Set(), removes: new Set() }
+}
+
+function warnSkippedAttribute(change: AttributeChange, email: string): void {
+    const kind = READ_ONLY_ATTRS.has(change.attribute) ? 'read-only' : 'unknown'
+    logger.warn(
+        `std:account:update ignoring ${kind} attribute "${change.attribute}" (op=${change.op}) for ${email}`
+    )
+}
+
+/**
+ * Grant/remove classic and NSF folder shares. Each entitlement is independent:
+ * a failure on one folder is collected and the remaining folders still run.
  * Remove runs first; if the same folder UID is also being granted (permission
  * change), skip remove and let grant update the existing share.
  */
@@ -212,7 +368,8 @@ async function applyFolderChanges(
     email: string,
     adds: string[],
     removes: string[]
-): Promise<void> {
+): Promise<OperationFailure[]> {
+    const failures: OperationFailure[] = []
     const catalog = await client.listAllFolders()
     const byUid = new Map<string, KeeperFolder>()
     for (const f of catalog) {
@@ -227,75 +384,168 @@ async function applyFolderChanges(
             // Permission upgrade/downgrade on same folder — grant will replace.
             continue
         }
-        const folder = byUid.get(uid)
-        if (!folder) {
-            throw new ConnectorError(
-                `Keeper folder with uid "${uid}" not found (remove "${id}")`,
-                ConnectorErrorType.NotFound
-            )
-        }
-        if (folder.folderType === 'non-sharable') {
-            throw new ConnectorError(`cannot remove share from non-sharable folder "${uid}"`)
-        }
-        logger.info(`Removing folder share ${uid} from ${email} (${folder.folderType})`)
-        if (folder.folderType === 'classic') {
-            await client.removeClassicFolderShare(uid, email)
-        } else {
-            await client.removeNsfFolderShare(uid, email)
+        try {
+            const folder = requireFolder(byUid, uid, `remove "${id}"`)
+            assertSharable(folder, 'remove')
+            logger.info(`Removing folder share ${uid} from ${email} (${folder.folderType})`)
+            if (folder.folderType === 'classic') {
+                await client.removeClassicFolderShare(uid, email)
+            } else {
+                await client.removeNsfFolderShare(uid, email)
+            }
+        } catch (err) {
+            failures.push(folderFailure('remove', id, err))
+            logger.warn(`Folder remove failed for ${id}: ${errorMessage(err)}`)
         }
     }
 
     for (const id of adds) {
-        const { uid, permission } = parseFolderEntitlementId(id)
-        const folder = byUid.get(uid)
-        if (!folder) {
-            throw new ConnectorError(
-                `Keeper folder with uid "${uid}" not found (grant "${id}")`,
-                ConnectorErrorType.NotFound
-            )
+        try {
+            const { uid, permission } = parseFolderEntitlementId(id)
+            const folder = requireFolder(byUid, uid, `grant "${id}"`)
+            assertSharable(folder, 'grant')
+            if (!permission || !isValidPermission(folder.folderType, permission)) {
+                throw new ConnectorError(`invalid folder entitlement "${id}" for folderType "${folder.folderType}"`)
+            }
+            logger.info(`Granting folder share ${id} to ${email} (${folder.folderType})`)
+            if (folder.folderType === 'classic') {
+                const flags = classicFlags(permission as ClassicPermission)
+                await client.grantClassicFolderShare(uid, email, flags.manageUsers, flags.manageRecords)
+            } else {
+                await client.grantNsfFolderShare(uid, email, nsfRoleForCode(permission as NsfPermission))
+            }
+        } catch (err) {
+            failures.push(folderFailure('grant', id, err))
+            logger.warn(`Folder grant failed for ${id}: ${errorMessage(err)}`)
         }
-        if (folder.folderType === 'non-sharable') {
-            throw new ConnectorError(`cannot grant share on non-sharable folder "${uid}"`)
+    }
+
+    return failures
+}
+
+/**
+ * Grant/revoke record shares one entitlement at a time so a single Commander
+ * failure does not skip the remaining record ops.
+ */
+async function applyRecordChanges(
+    client: KeeperClient,
+    email: string,
+    adds: string[],
+    removes: string[]
+): Promise<OperationFailure[]> {
+    const failures: OperationFailure[] = []
+
+    for (const id of adds) {
+        try {
+            await client.updateRecordPermissions({ email, addRecordValues: [id] })
+        } catch (err) {
+            failures.push(recordFailure('grant', id, err))
+            logger.warn(`Record grant failed for ${id}: ${errorMessage(err)}`)
         }
-        if (!permission || !isValidPermission(folder.folderType, permission)) {
-            throw new ConnectorError(`invalid folder entitlement "${id}" for folderType "${folder.folderType}"`)
+    }
+
+    for (const id of removes) {
+        try {
+            await client.updateRecordPermissions({ email, removeRecordValues: [id] })
+        } catch (err) {
+            failures.push(recordFailure('revoke', id, err))
+            logger.warn(`Record revoke failed for ${id}: ${errorMessage(err)}`)
         }
-        logger.info(`Granting folder share ${id} to ${email} (${folder.folderType})`)
-        if (folder.folderType === 'classic') {
-            const flags = classicFlags(permission as ClassicPermission)
-            await client.grantClassicFolderShare(uid, email, flags.manageUsers, flags.manageRecords)
-        } else {
-            await client.grantNsfFolderShare(uid, email, nsfRoleForCode(permission as NsfPermission))
-        }
+    }
+
+    return failures
+}
+
+function folderFailure(action: 'grant' | 'remove', target: string, err: unknown): OperationFailure {
+    return {
+        attribute: 'folders',
+        action: `${action} folder share`,
+        target,
+        message: errorMessage(err),
+    }
+}
+
+function recordFailure(action: 'grant' | 'revoke', target: string, err: unknown): OperationFailure {
+    return {
+        attribute: 'records',
+        action: `${action} record share`,
+        target,
+        message: errorMessage(err),
+    }
+}
+
+function errorMessage(err: unknown): string {
+    if (err instanceof Error) return err.message
+    return String(err)
+}
+
+/**
+ * One Result entry per failed attribute (folders / records / …), with every
+ * failed entitlement listed in the messages array — SailPoint-native partial
+ * attribute reporting on StdAccountUpdateOutput.results.
+ */
+function toAttributeResults(failures: OperationFailure[]): Result[] {
+    const byAttribute = new Map<string, OperationFailure[]>()
+    for (const f of failures) {
+        const list = byAttribute.get(f.attribute) ?? []
+        list.push(f)
+        byAttribute.set(f.attribute, list)
+    }
+
+    const results: Result[] = []
+    for (const [attribute, items] of byAttribute) {
+        results.push({
+            attribute,
+            status: ResultStatus.Error,
+            messages: items.map((item) => ({
+                level: ResultMessageLevel.ERROR,
+                message: `Failed to ${item.action} "${item.target}": ${item.message}`,
+            })),
+        })
+    }
+    return results
+}
+
+function formatAggregatedError(email: string, failures: OperationFailure[]): string {
+    const details = failures
+        .map((f, i) => `${i + 1}) ${f.attribute}: failed to ${f.action} "${f.target}" — ${f.message}`)
+        .join('; ')
+    return (
+        `Account update partially failed for "${email}". ` +
+        `${failures.length} operation(s) failed; successful changes were applied. ` +
+        `Details: ${details}`
+    )
+}
+
+function requireFolder(byUid: Map<string, KeeperFolder>, uid: string, context: string): KeeperFolder {
+    const folder = byUid.get(uid)
+    if (!folder) {
+        throw new ConnectorError(`Keeper folder with uid "${uid}" not found (${context})`, ConnectorErrorType.NotFound)
+    }
+    return folder
+}
+
+function assertSharable(folder: KeeperFolder, action: 'grant' | 'remove'): void {
+    if (folder.folderType === 'non-sharable') {
+        throw new ConnectorError(`cannot ${action} share on non-sharable folder "${folder.uid}"`)
     }
 }
 
 async function fetchFreshAccount(client: KeeperClient, email: string): Promise<StdAccountUpdateOutput> {
-    // Folders/records come from vault tree; node/teams/roles are inline on user.
     const user = await client.getUser(email)
-    const folders = await client.listAllFolders()
-    const records = getRecordList(await client.listVaultTree(), await client.getWhoami())
     if (!user) {
         throw new ConnectorError(
             `Keeper user with email "${email}" not found after update`,
             ConnectorErrorType.NotFound
         )
     }
-    return toAccount(user, buildAccountMaps(folders), buildRecordMaps(records))
-}
 
-function hasActionableChange(opts: UpdateUserOptions): boolean {
-    return (
-        opts.name !== undefined ||
-        opts.jobTitle !== undefined ||
-        opts.nodeId !== undefined ||
-        (opts.addRoleValues?.length ?? 0) > 0 ||
-        (opts.removeRoleValues?.length ?? 0) > 0 ||
-        (opts.addTeamValues?.length ?? 0) > 0 ||
-        (opts.removeTeamValues?.length ?? 0) > 0 ||
-        (opts.addRecordValues?.length ?? 0) > 0 ||
-        (opts.removeRecordValues?.length ?? 0) > 0
-    )
+    const folders = await client.listAllFolders()
+    const vaultTree = await client.listVaultTree()
+    const whoami = await client.getWhoami()
+    const records = getRecordList(vaultTree, whoami)
+
+    return toAccount(user, buildAccountMaps(folders), buildRecordMaps(records))
 }
 
 function applyRequiredStringChange(change: AttributeChange, label: string, assign: (value: string) => void): void {
@@ -311,8 +561,7 @@ function applyRequiredStringChange(change: AttributeChange, label: string, assig
 
 /**
  * Keeper enterprise users belong to exactly one node.
- * - Remove (typical Role/AP deprovision): skip — cannot leave a user nodeless;
- *   move them with Set/Add instead.
+ * - Remove (typical Role/AP deprovision): skip — cannot leave a user nodeless.
  * - Set/Add: validate a single id via requireSingleNodeId (shared with create).
  */
 function applyNodeChange(change: AttributeChange, assign: (value: string) => void): void {
@@ -335,46 +584,10 @@ function applyOptionalStringChange(change: AttributeChange, assign: (value: stri
     assign(normalizeString(change.value) ?? '')
 }
 
-/**
- * Diff a multi-valued entitlement change into `adds` and `removes` sets of
- * IDs. Both `currentIds` (from getUser) and ISC-supplied values are stable
- * IDs (team_uid / role_id), so the Set-diff is a direct set comparison —
- * no catalog lookup, no name translation.
- */
-function applyMultiValuedChange(
-    change: AttributeChange,
-    adds: Set<string>,
-    removes: Set<string>,
-    currentIds: string[]
-): void {
-    const values = coerceNonEmptyStrings(change.value)
-
-    switch (change.op) {
-        case AttributeChangeOp.Add:
-            for (const v of values) adds.add(v)
-            return
-        case AttributeChangeOp.Remove:
-            for (const v of values) removes.add(v)
-            return
-        case AttributeChangeOp.Set: {
-            const desired = new Set(values)
-            const current = new Set(currentIds)
-            for (const id of desired) {
-                if (!current.has(id)) adds.add(id)
-            }
-            for (const id of current) {
-                if (!desired.has(id)) removes.add(id)
-            }
-            return
-        }
-    }
-}
-
 function rejectEmailChange(change: AttributeChange, currentEmail: string): void {
     // A Set that matches the current identity is a harmless no-op that some
-    // provisioning policies emit; let it through silently. Anything else
-    // (Add/Remove, or a Set to a different value) is a real attempt to move
-    // the identity, which this connector does not support.
+    // provisioning policies emit; let it through silently. Anything else is a
+    // real attempt to move the identity, which this connector does not support.
     if (change.op === AttributeChangeOp.Set) {
         const desired = normalizeString(change.value)
         if (desired && desired.toLowerCase() === currentEmail.toLowerCase()) {

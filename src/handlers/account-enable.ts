@@ -30,7 +30,7 @@ export function createAccountEnableHandler(client: KeeperClient) {
         // and the updated Keeper status (Active).
         const user = await client.getUser(email)
         const folders = await client.listAllFolders()
-        const records = getRecordList(await client.listVaultTree(),await client.getWhoami()) 
+        const records = getRecordList(await client.listVaultTree(), await client.getWhoami())
 
         if (!user) {
             throw new ConnectorError(

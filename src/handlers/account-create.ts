@@ -74,10 +74,10 @@ export function createAccountCreateHandler(client: KeeperClient) {
 
         // Fetch the fresh user + folders so ISC's stored account view
         // matches Keeper's post-invite state (status will be "Invited"
-        // until the user accepts the email and sets up their vault). 
+        // until the user accepts the email and sets up their vault).
         const user = await client.getUser(email)
         const folders = await client.listAllFolders()
-        const records = getRecordList(await client.listVaultTree(),await client.getWhoami()) 
+        const records = getRecordList(await client.listVaultTree(), await client.getWhoami())
 
         if (!user) {
             throw new ConnectorError(

@@ -34,7 +34,7 @@ export function createAccountReadHandler(client: KeeperClient) {
 
         const user = await client.getUser(email)
         const folders = await client.listAllFolders()
-        const records = getRecordList(await client.listVaultTree(),await client.getWhoami()) 
+        const records = getRecordList(await client.listVaultTree(), await client.getWhoami())
 
         if (!user) {
             throw new ConnectorError(`Keeper user with email "${email}" not found`, ConnectorErrorType.NotFound)

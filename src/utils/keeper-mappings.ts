@@ -32,7 +32,7 @@ export interface AccountMaps {
     userEmailToFolderIds: Map<string, string[]>
 }
 
-export interface RecordMaps{
+export interface RecordMaps {
     userEmailToRecordIds: Map<string, string[]>
 }
 
@@ -79,20 +79,13 @@ function registerFirstOrWarn(map: Map<string, string>, key: string, value: strin
  * entitlement attribute); everything else — node, teams, roles — is now
  * inline on the user as stable IDs.
  */
-function pushFolderEntitlement(
-    map: Map<string, string[]>,
-    key: string,
-    entitlementId: string
-): void {
+function pushFolderEntitlement(map: Map<string, string[]>, key: string, entitlementId: string): void {
     const list = map.get(key) ?? []
     if (!list.includes(entitlementId)) list.push(entitlementId)
     map.set(key, list)
 }
 
-function addUserFolderEntitlements(
-    map: Map<string, string[]>,
-    folder: KeeperFolder
-): void {
+function addUserFolderEntitlements(map: Map<string, string[]>, folder: KeeperFolder): void {
     if (!folder.uid) return
     for (const [email, treePerms] of Object.entries(folder.userPermissions ?? {})) {
         const key = email?.trim().toLowerCase()
@@ -103,10 +96,7 @@ function addUserFolderEntitlements(
     }
 }
 
-function addTeamFolderEntitlements(
-    map: Map<string, string[]>,
-    folder: KeeperFolder
-): void {
+function addTeamFolderEntitlements(map: Map<string, string[]>, folder: KeeperFolder): void {
     if (!folder.uid) return
     for (const [teamUid, treePerms] of Object.entries(folder.teamPermissions ?? {})) {
         if (!teamUid?.trim()) continue
@@ -130,7 +120,7 @@ export function buildAccountMaps(folders: KeeperFolder[]): AccountMaps {
 
 export function buildRecordMaps(records: KeeperRecord[]): RecordMaps {
     const userEmailToRecordIds = new Map<string, string[]>()
-    for (const record of records){
+    for (const record of records) {
         for (const email of record.users ?? []) {
             const key = email?.trim().toLowerCase()
             if (!key) continue
@@ -273,7 +263,7 @@ export function toAccount(user: KeeperUser, maps: AccountMaps, recordMaps: Recor
 
 /**
  * Sharable folder entitlement = folder UID + permission code.
- * Classic: NP|MU|MR|MUR. NSF: V|SM|CM|CSM|FM.
+ * Classic: NP|MU|MR|MUR. NSF: VW|SM|CM|CSM|FM.
  */
 export function toFolderEntitlement(folder: KeeperFolder, permission: FolderPermission): StdEntitlementListOutput {
     const id = toFolderEntitlementId(folder.uid, permission)
@@ -322,7 +312,5 @@ export function toFolderEntitlements(folder: KeeperFolder): StdEntitlementListOu
     if (folder.folderType === 'non-sharable') {
         return [toNonSharableFolderEntitlement(folder)]
     }
-    return permissionsForFolderType(folder.folderType).map((permission) =>
-        toFolderEntitlement(folder, permission)
-    )
+    return permissionsForFolderType(folder.folderType).map((permission) => toFolderEntitlement(folder, permission))
 }

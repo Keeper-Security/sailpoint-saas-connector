@@ -15,12 +15,14 @@ function getChildrenRecords(childrenNode: KeeperVaultTreeNode[]): any[] {
     const records: any[] = []
 
     for (const child_node of childrenNode) {
-        if ((child_node.kind === 'shared_folder' || child_node.kind === 'folder') && child_node.children !== undefined) {
+        if (
+            (child_node.kind === 'shared_folder' || child_node.kind === 'folder') &&
+            child_node.children !== undefined
+        ) {
             records.push(...getChildrenRecords(child_node.children))
         } else if (child_node.kind === 'record' || child_node.kind === 'nested_record') {
-
-            const user_permissions = child_node.share_permissions as KeeperUserSharePermissions;
-            const users = user_permissions.users;
+            const user_permissions = child_node.share_permissions as KeeperUserSharePermissions
+            const users = user_permissions.users
 
             // const find_owner = users?.find(user => user.email === _whoami.user && user.permissions.includes('OW'));
             // put everything to if block to filter based on owner.
@@ -45,13 +47,11 @@ function getChildrenRecords(childrenNode: KeeperVaultTreeNode[]): any[] {
             }
 
             records.push(keeper_record)
-
         }
     }
 
     return records
 }
-
 
 export function getRecordListByEmail(email: string, _vaultTree: KeeperVaultTreeData): any[] {
     const vtree = _vaultTree.tree
@@ -60,19 +60,16 @@ export function getRecordListByEmail(email: string, _vaultTree: KeeperVaultTreeD
     const filter_records = getChildrenRecords(children)
     const user_record_perm = []
 
-    for(const record of filter_records) {
-
+    for (const record of filter_records) {
         const filter_user = record.user_permissions.users.filter((user: any) => user.email === email)
         if (filter_user.length > 0) {
-            for(const permission of filter_user[0].permissions){
-                user_record_perm.push(record.record_uid+':'+permission)
+            for (const permission of filter_user[0].permissions) {
+                user_record_perm.push(record.record_uid + ':' + permission)
             }
-
         }
     }
     return user_record_perm
-
-    }
+}
 
 export function getRecordList(_vaultTree: KeeperVaultTreeData, _whoami: WhoamiInfo): KeeperRecord[] {
     const vtree = _vaultTree.tree
@@ -82,26 +79,23 @@ export function getRecordList(_vaultTree: KeeperVaultTreeData, _whoami: WhoamiIn
     delete classic_permissions['MR']
     const nsf_permissions = _vaultTree.share_permissions_key.nsf
 
-
     const children = vtree.children || []
     const filter_records = getChildrenRecords(children)
 
     const sail_entitlements: KeeperRecord[] = []
 
     for (const record of filter_records) {
-        const user_permissions = record.user_permissions;
-        const lusers = user_permissions.users;
+        const user_permissions = record.user_permissions
+        const lusers = user_permissions.users
         if (record.record_category === 'classic') {
-
-
-
-            for (const permission of Object.keys(classic_permissions)) {      
-                
-                const get_users = lusers.filter((user: any) => user.permissions.includes(permission)).map((user: any) => user.email);
+            for (const permission of Object.keys(classic_permissions)) {
+                const get_users = lusers
+                    .filter((user: any) => user.permissions.includes(permission))
+                    .map((user: any) => user.email)
 
                 sail_entitlements.push({
                     record_uid: record.record_uid,
-                    record_uid_perm: record.record_uid+':'+permission,
+                    record_uid_perm: record.record_uid + ':' + permission,
                     title: record.title,
                     record_category: record.record_category,
                     type: record.type,
@@ -112,11 +106,13 @@ export function getRecordList(_vaultTree: KeeperVaultTreeData, _whoami: WhoamiIn
             }
         } else {
             for (const permission of Object.keys(nsf_permissions)) {
-                const get_users = lusers.filter((user: any) => user.permissions.includes(permission)).map((user: any) => user.email);
+                const get_users = lusers
+                    .filter((user: any) => user.permissions.includes(permission))
+                    .map((user: any) => user.email)
 
                 sail_entitlements.push({
                     record_uid: record.record_uid,
-                    record_uid_perm: record.record_uid+':'+permission,
+                    record_uid_perm: record.record_uid + ':' + permission,
                     title: record.title,
                     record_category: record.record_category,
                     type: record.type,
@@ -160,7 +156,11 @@ function stripLeadingSlash(path: string): string {
     return path.replace(/^\/+/, '')
 }
 
-function toKeeperFolder(node: KeeperVaultTreeNode, parentId: string | undefined, folderType: KeeperFolderType): KeeperFolder {
+function toKeeperFolder(
+    node: KeeperVaultTreeNode,
+    parentId: string | undefined,
+    folderType: KeeperFolderType
+): KeeperFolder {
     const uid = node.uid!.trim()
     const rawPath = (node.path || node.name || uid)?.trim()
     const userPermissions: Record<string, string[]> = {}
@@ -241,18 +241,13 @@ export function coerceNonEmptyStrings(value: unknown): string[] {
  * Keeper enterprise users belong to exactly one node. Accept a single id
  * (string or one-element array) and reject empty / multiple values.
  */
-export function requireSingleNodeId(
-    value: unknown,
-    emptyMessage = 'attribute "node" cannot be empty'
-): string {
+export function requireSingleNodeId(value: unknown, emptyMessage = 'attribute "node" cannot be empty'): string {
     const values = coerceNonEmptyStrings(value)
     if (values.length === 0) {
         throw new ConnectorError(emptyMessage)
     }
     if (values.length > 1) {
-        throw new ConnectorError(
-            `node is single-valued; expected one node id, got ${values.length}`
-        )
+        throw new ConnectorError(`node is single-valued; expected one node id, got ${values.length}`)
     }
     return values[0]
 }
