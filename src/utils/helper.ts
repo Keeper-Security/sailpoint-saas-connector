@@ -9,57 +9,82 @@ import {
     KeeperVaultTreeData,
     KeeperVaultTreeNode,
 } from '../model/keeper-entities'
-import { WhoamiInfo } from '../client/keeper-client'
+import { KeeperClient, WhoamiInfo } from '../client/keeper-client'
 
-function getChildrenRecords(childrenNode: KeeperVaultTreeNode[], _whoami: WhoamiInfo): any[] {
-    const records:any[] = []
+function getChildrenRecords(childrenNode: KeeperVaultTreeNode[]): any[] {
+    const records: any[] = []
 
     for (const child_node of childrenNode) {
         if ((child_node.kind === 'shared_folder' || child_node.kind === 'folder') && child_node.children !== undefined) {
-            records.push(...getChildrenRecords(child_node.children, _whoami))
+            records.push(...getChildrenRecords(child_node.children))
         } else if (child_node.kind === 'record' || child_node.kind === 'nested_record') {
 
             const user_permissions = child_node.share_permissions as KeeperUserSharePermissions;
             const users = user_permissions.users;
 
-            const find_owner = users?.find(user => user.email === _whoami.user && user.permissions.includes('OW'));
+            // const find_owner = users?.find(user => user.email === _whoami.user && user.permissions.includes('OW'));
+            // put everything to if block to filter based on owner.
 
-            if(find_owner){
-                let record_category = ''
+            let record_category = ''
 
-                if (child_node.kind == 'record') {
-                    record_category = 'classic'
-                } else {
-                    record_category = 'nested'
-                }
-    
-                const keeper_record: any = {
-                    record_uid: child_node.uid || '',
-                    record_uid_perm: child_node.uid || '',
-                    permission: '',
-                    title: child_node.name,
-                    record_category: record_category,
-                    type: child_node.record_type ?? '',
-                    path: child_node.path,
-                    user_permissions: user_permissions,
-                }
-    
-                records.push(keeper_record)
+            if (child_node.kind == 'record') {
+                record_category = 'classic'
+            } else {
+                record_category = 'nested'
             }
+
+            const keeper_record: any = {
+                record_uid: child_node.uid || '',
+                record_uid_perm: child_node.uid || '',
+                permission: '',
+                title: child_node.name,
+                record_category: record_category,
+                type: child_node.record_type ?? '',
+                path: child_node.path,
+                user_permissions: user_permissions,
+            }
+
+            records.push(keeper_record)
+
         }
     }
 
     return records
 }
 
+
+export function getRecordListByEmail(email: string, _vaultTree: KeeperVaultTreeData): any[] {
+    const vtree = _vaultTree.tree
+
+    const children = vtree.children || []
+    const filter_records = getChildrenRecords(children)
+    const user_record_perm = []
+
+    for(const record of filter_records) {
+
+        const filter_user = record.user_permissions.users.filter((user: any) => user.email === email)
+        if (filter_user.length > 0) {
+            for(const permission of filter_user[0].permissions){
+                user_record_perm.push(record.record_uid+':'+permission)
+            }
+
+        }
+    }
+    return user_record_perm
+
+    }
+
 export function getRecordList(_vaultTree: KeeperVaultTreeData, _whoami: WhoamiInfo): KeeperRecord[] {
     const vtree = _vaultTree.tree
     // share_permissions_key.classic / .nsf are maps { code: label }, not arrays
     const classic_permissions = _vaultTree.share_permissions_key.classic
+    delete classic_permissions['MU']
+    delete classic_permissions['MR']
     const nsf_permissions = _vaultTree.share_permissions_key.nsf
 
+
     const children = vtree.children || []
-    const filter_records = getChildrenRecords(children, _whoami)
+    const filter_records = getChildrenRecords(children)
 
     const sail_entitlements: KeeperRecord[] = []
 
