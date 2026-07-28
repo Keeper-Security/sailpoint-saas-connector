@@ -381,6 +381,8 @@ export class KeeperClient {
                     return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r content-share-manager`
                 case "CM":
                     return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r content-manager`
+                case "OW":
+                    throw new ConnectorError(`Ownership change is restricted. Please perform this action on Keeper Vault.`)
                 default:
                         throw new ConnectorError(`Invalid permission: ${assign_perm}`)
 
