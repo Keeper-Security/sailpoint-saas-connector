@@ -33,18 +33,18 @@ export function createEntitlementListHandler(client: KeeperClient) {
         await client.syncEnterprise()
         logger.info('Synced enterprise while listing entitlements')
 
-        const vaultTree = await client.listVaultTree();        
+        const vaultTree = await client.listVaultTree()
 
         switch (type) {
             case 'node': {
                 const nodes = await client.listNodes()
                 logger.info(`Fetched ${nodes.length} Keeper nodes`)
+
                 for (const node of nodes) {
                     res.send(toNodeEntitlement(node))
                 }
                 return
             }
-
             case 'team': {
                 const teams = await client.listTeams()
                 const nodes = await client.listNodes()
@@ -54,13 +54,10 @@ export function createEntitlementListHandler(client: KeeperClient) {
                 const teamUidToFolderIds = buildTeamFolderMap(folders)
                 logger.info(`Fetched ${teams.length} Keeper teams`)
                 for (const team of teams) {
-                    res.send(
-                        toTeamEntitlement(team, nodePathToId, teamUidToFolderIds.get(team.team_uid) ?? [])
-                    )
+                    res.send(toTeamEntitlement(team, nodePathToId, teamUidToFolderIds.get(team.team_uid) ?? []))
                 }
                 return
             }
-
             case 'role': {
                 const roles = await client.listRoles()
                 const nodes = await client.listNodes()
@@ -72,9 +69,8 @@ export function createEntitlementListHandler(client: KeeperClient) {
                 return
             }
             case 'record': {
-                const whoami = await client.getWhoami()
-                const records = getRecordList(vaultTree,whoami) 
-                
+                const records = getRecordList(vaultTree)
+
                 for (const record of records) {
                     res.send(toRecordEntitlement(record))
                 }
@@ -96,7 +92,6 @@ export function createEntitlementListHandler(client: KeeperClient) {
                 )
                 return
             }
-
             default:
                 throw new ConnectorError(
                     `Unsupported entitlement type "${type}"; expected one of: ${SUPPORTED_TYPES.join(', ')}`

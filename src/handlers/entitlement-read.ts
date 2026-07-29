@@ -2,7 +2,6 @@ import {
     ConnectorError,
     ConnectorErrorType,
     Context,
-    KeyID,
     logger,
     Response,
     StdEntitlementReadInput,
@@ -18,12 +17,9 @@ import {
     toRoleEntitlement,
     toTeamEntitlement,
 } from '../utils/keeper-mappings'
-import {
-    FolderPermission,
-    isValidPermission,
-    parseFolderEntitlementId,
-} from '../utils/folder-permissions'
+import { FolderPermission, isValidPermission, parseFolderEntitlementId } from '../utils/folder-permissions'
 import { getAllShareableFolders } from '../utils/helper'
+import { safeKeyId } from '../utils/identity'
 
 const SUPPORTED_TYPES = ['node', 'team', 'role', 'folder'] as const
 
@@ -40,9 +36,7 @@ export function createEntitlementReadHandler(client: KeeperClient) {
         // harnesses (spcx / Postman) work reliably.
         const identity = safeKeyId(input) ?? input?.identity
         if (!identity) {
-            throw new ConnectorError(
-                `std:entitlement:read called without an identity (type: ${type ?? 'unknown'})`
-            )
+            throw new ConnectorError(`std:entitlement:read called without an identity (type: ${type ?? 'unknown'})`)
         }
 
         logger.info(`Reading Keeper ${type} entitlement ${identity}`)
@@ -54,10 +48,7 @@ export function createEntitlementReadHandler(client: KeeperClient) {
                 const nodes = await client.listNodes()
                 const node = nodes.find((n) => String(n.node_id) === identity)
                 if (!node) {
-                    throw new ConnectorError(
-                        `Keeper node with id "${identity}" not found`,
-                        ConnectorErrorType.NotFound
-                    )
+                    throw new ConnectorError(`Keeper node with id "${identity}" not found`, ConnectorErrorType.NotFound)
                 }
                 res.send(toNodeEntitlement(node))
                 return
@@ -75,13 +66,7 @@ export function createEntitlementReadHandler(client: KeeperClient) {
                     )
                 }
                 const teamUidToFolderIds = buildTeamFolderMap(folders)
-                res.send(
-                    toTeamEntitlement(
-                        team,
-                        buildNodePathMap(nodes),
-                        teamUidToFolderIds.get(team.team_uid) ?? []
-                    )
-                )
+                res.send(toTeamEntitlement(team, buildNodePathMap(nodes), teamUidToFolderIds.get(team.team_uid) ?? []))
                 return
             }
 
@@ -90,10 +75,7 @@ export function createEntitlementReadHandler(client: KeeperClient) {
                 const nodes = await client.listNodes()
                 const role = roles.find((r) => String(r.role_id) === identity)
                 if (!role) {
-                    throw new ConnectorError(
-                        `Keeper role with id "${identity}" not found`,
-                        ConnectorErrorType.NotFound
-                    )
+                    throw new ConnectorError(`Keeper role with id "${identity}" not found`, ConnectorErrorType.NotFound)
                 }
                 res.send(toRoleEntitlement(role, buildNodePathMap(nodes)))
                 return
@@ -105,10 +87,7 @@ export function createEntitlementReadHandler(client: KeeperClient) {
                 const folders = getAllShareableFolders(vaultTree)
                 const folder = folders.find((f) => f.uid === uid)
                 if (!folder) {
-                    throw new ConnectorError(
-                        `Keeper folder with uid "${uid}" not found`,
-                        ConnectorErrorType.NotFound
-                    )
+                    throw new ConnectorError(`Keeper folder with uid "${uid}" not found`, ConnectorErrorType.NotFound)
                 }
                 if (folder.folderType === 'non-sharable') {
                     if (permission != null) {
@@ -136,15 +115,5 @@ export function createEntitlementReadHandler(client: KeeperClient) {
                     `Unsupported entitlement type "${type}"; expected one of: ${SUPPORTED_TYPES.join(', ')}`
                 )
         }
-    }
-}
-
-/** Returns the key's simple id if present, else null. KeyID throws on missing keys. */
-function safeKeyId(input: StdEntitlementReadInput): string | null {
-    if (!input?.key) return null
-    try {
-        return KeyID({ key: input.key })
-    } catch {
-        return null
     }
 }

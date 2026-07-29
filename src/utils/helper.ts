@@ -9,126 +9,113 @@ import {
     KeeperVaultTreeData,
     KeeperVaultTreeNode,
 } from '../model/keeper-entities'
-import { KeeperClient, WhoamiInfo } from '../client/keeper-client'
 
-function getChildrenRecords(childrenNode: KeeperVaultTreeNode[]): any[] {
-    const records: any[] = []
+/** Intermediate record node collected while walking the vault tree. */
+interface VaultRecordNode {
+    recordUid: string
+    title: string
+    recordCategory: 'classic' | 'nested'
+    type: string
+    path: string
+    userPermissions: KeeperUserSharePermissions
+}
 
-    for (const child_node of childrenNode) {
-        if ((child_node.kind === 'shared_folder' || child_node.kind === 'folder') && child_node.children !== undefined) {
-            records.push(...getChildrenRecords(child_node.children))
-        } else if (child_node.kind === 'record' || child_node.kind === 'nested_record') {
+function getChildrenRecords(childrenNode: KeeperVaultTreeNode[]): VaultRecordNode[] {
+    const records: VaultRecordNode[] = []
 
-            const user_permissions = child_node.share_permissions as KeeperUserSharePermissions;
-            const users = user_permissions.users;
-
-            // const find_owner = users?.find(user => user.email === _whoami.user && user.permissions.includes('OW'));
-            // put everything to if block to filter based on owner.
-
-            let record_category = ''
-
-            if (child_node.kind == 'record') {
-                record_category = 'classic'
-            } else {
-                record_category = 'nested'
-            }
-
-            const keeper_record: any = {
-                record_uid: child_node.uid || '',
-                record_uid_perm: child_node.uid || '',
-                permission: '',
-                title: child_node.name,
-                record_category: record_category,
-                type: child_node.record_type ?? '',
-                path: child_node.path,
-                user_permissions: user_permissions,
-            }
-
-            records.push(keeper_record)
-
+    for (const childNode of childrenNode) {
+        if (
+            (childNode.kind === 'shared_folder' || childNode.kind === 'folder') &&
+            childNode.children !== undefined
+        ) {
+            records.push(...getChildrenRecords(childNode.children))
+        } else if (childNode.kind === 'record' || childNode.kind === 'nested_record') {
+            const userPermissions = childNode.share_permissions as KeeperUserSharePermissions
+            records.push({
+                recordUid: childNode.uid || '',
+                title: childNode.name,
+                recordCategory: childNode.kind === 'record' ? 'classic' : 'nested',
+                type: childNode.record_type ?? '',
+                path: childNode.path,
+                userPermissions,
+            })
         }
     }
 
     return records
 }
 
+/** Entitlement ids (`uid:PERM`) for records shared directly with this email. */
+export function getRecordListByEmail(email: string, vaultTree: KeeperVaultTreeData): string[] {
+    const children = vaultTree.tree?.children || []
+    const filterRecords = getChildrenRecords(children)
+    const userRecordPerm: string[] = []
 
-export function getRecordListByEmail(email: string, _vaultTree: KeeperVaultTreeData): any[] {
-    const vtree = _vaultTree.tree
-
-    const children = vtree.children || []
-    const filter_records = getChildrenRecords(children)
-    const user_record_perm = []
-
-    for(const record of filter_records) {
-
-        const filter_user = record.user_permissions.users.filter((user: any) => user.email === email)
-        if (filter_user.length > 0) {
-            for(const permission of filter_user[0].permissions){
-                user_record_perm.push(record.record_uid+':'+permission)
+    for (const record of filterRecords) {
+        const matchedUsers = (record.userPermissions.users ?? []).filter((user) => user.email === email)
+        if (matchedUsers.length > 0) {
+            for (const permission of matchedUsers[0].permissions ?? []) {
+                userRecordPerm.push(`${record.recordUid}:${permission}`)
             }
-
         }
     }
-    return user_record_perm
+    return userRecordPerm
+}
 
-    }
+/**
+ * Expand vault-tree records into SailPoint record entitlements
+ * (`record_uid:permission` rows). Does not mutate the vault-tree response.
+ */
+export function getRecordList(vaultTree: KeeperVaultTreeData): KeeperRecord[] {
+    const classicPermissions = vaultTree.share_permissions_key.classic
+    const nsfPermissions = vaultTree.share_permissions_key.nsf
+    // MU/MR are folder-share flags on classic maps — exclude from record entitlements.
+    const classicCodes = Object.keys(classicPermissions).filter((code) => code !== 'MU' && code !== 'MR')
 
-export function getRecordList(_vaultTree: KeeperVaultTreeData, _whoami: WhoamiInfo): KeeperRecord[] {
-    const vtree = _vaultTree.tree
-    // share_permissions_key.classic / .nsf are maps { code: label }, not arrays
-    const classic_permissions = _vaultTree.share_permissions_key.classic
-    delete classic_permissions['MU']
-    delete classic_permissions['MR']
-    const nsf_permissions = _vaultTree.share_permissions_key.nsf
+    const children = vaultTree.tree?.children || []
+    const filterRecords = getChildrenRecords(children)
+    const sailEntitlements: KeeperRecord[] = []
 
+    for (const record of filterRecords) {
+        const users = record.userPermissions.users ?? []
+        if (record.recordCategory === 'classic') {
+            for (const permission of classicCodes) {
+                const getUsers = users
+                    .filter((user) => user.permissions.includes(permission))
+                    .map((user) => user.email)
 
-    const children = vtree.children || []
-    const filter_records = getChildrenRecords(children)
-
-    const sail_entitlements: KeeperRecord[] = []
-
-    for (const record of filter_records) {
-        const user_permissions = record.user_permissions;
-        const lusers = user_permissions.users;
-        if (record.record_category === 'classic') {
-
-
-
-            for (const permission of Object.keys(classic_permissions)) {      
-                
-                const get_users = lusers.filter((user: any) => user.permissions.includes(permission)).map((user: any) => user.email);
-
-                sail_entitlements.push({
-                    record_uid: record.record_uid,
-                    record_uid_perm: record.record_uid+':'+permission,
+                sailEntitlements.push({
+                    record_uid: record.recordUid,
+                    record_uid_perm: `${record.recordUid}:${permission}`,
                     title: record.title,
-                    record_category: record.record_category,
+                    record_category: record.recordCategory,
                     type: record.type,
                     path: record.path,
-                    permission: classic_permissions[permission],
-                    users: get_users,
+                    permission: classicPermissions[permission],
+                    users: getUsers,
                 })
             }
         } else {
-            for (const permission of Object.keys(nsf_permissions)) {
-                const get_users = lusers.filter((user: any) => user.permissions.includes(permission)).map((user: any) => user.email);
+            for (const permission of Object.keys(nsfPermissions)) {
+                const getUsers = users
+                    .filter((user) => user.permissions.includes(permission))
+                    .map((user) => user.email)
 
-                sail_entitlements.push({
-                    record_uid: record.record_uid,
-                    record_uid_perm: record.record_uid+':'+permission,
+                sailEntitlements.push({
+                    record_uid: record.recordUid,
+                    record_uid_perm: `${record.recordUid}:${permission}`,
                     title: record.title,
-                    record_category: record.record_category,
+                    record_category: record.recordCategory,
                     type: record.type,
                     path: record.path,
-                    permission: nsf_permissions[permission],
-                    users: get_users,
+                    permission: nsfPermissions[permission],
+                    users: getUsers,
                 })
             }
         }
     }
 
-    return sail_entitlements
+    return sailEntitlements
 }
 
 const CONTAINER_KINDS = new Set(['shared_folder', 'folder', 'nested_share_folder'])
@@ -160,7 +147,11 @@ function stripLeadingSlash(path: string): string {
     return path.replace(/^\/+/, '')
 }
 
-function toKeeperFolder(node: KeeperVaultTreeNode, parentId: string | undefined, folderType: KeeperFolderType): KeeperFolder {
+function toKeeperFolder(
+    node: KeeperVaultTreeNode,
+    parentId: string | undefined,
+    folderType: KeeperFolderType
+): KeeperFolder {
     const uid = node.uid!.trim()
     const rawPath = (node.path || node.name || uid)?.trim()
     const userPermissions: Record<string, string[]> = {}
@@ -227,6 +218,13 @@ export function getAllShareableFolders(vaultTree: KeeperVaultTreeData): KeeperFo
     return out
 }
 
+/** Returns a trimmed non-empty string, or undefined for anything else. */
+export function normalizeString(value: unknown): string | undefined {
+    if (typeof value !== 'string') return undefined
+    const trimmed = value.trim()
+    return trimmed === '' ? undefined : trimmed
+}
+
 /**
  * Normalize a scalar or array attribute into non-empty trimmed strings.
  * ISC often wraps single-valued managed entitlements (e.g. `node`) as arrays.
@@ -238,21 +236,27 @@ export function coerceNonEmptyStrings(value: unknown): string[] {
 }
 
 /**
+ * Read a single-valued attribute that ISC may deliver either as a scalar string
+ * or as an array (managed entitlements). Returns the first non-empty trimmed value.
+ */
+export function firstEntitlementValue(value: unknown): string | undefined {
+    const asScalar = normalizeString(value)
+    if (asScalar) return asScalar
+    const asArray = coerceNonEmptyStrings(value)
+    return asArray[0]
+}
+
+/**
  * Keeper enterprise users belong to exactly one node. Accept a single id
  * (string or one-element array) and reject empty / multiple values.
  */
-export function requireSingleNodeId(
-    value: unknown,
-    emptyMessage = 'attribute "node" cannot be empty'
-): string {
+export function requireSingleNodeId(value: unknown, emptyMessage = 'attribute "node" cannot be empty'): string {
     const values = coerceNonEmptyStrings(value)
     if (values.length === 0) {
         throw new ConnectorError(emptyMessage)
     }
     if (values.length > 1) {
-        throw new ConnectorError(
-            `node is single-valued; expected one node id, got ${values.length}`
-        )
+        throw new ConnectorError(`node is single-valued; expected one node id, got ${values.length}`)
     }
     return values[0]
 }

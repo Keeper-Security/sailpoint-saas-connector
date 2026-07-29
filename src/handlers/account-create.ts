@@ -1,6 +1,5 @@
 import {
     ConnectorError,
-    ConnectorErrorType,
     Context,
     logger,
     Response,
@@ -8,8 +7,8 @@ import {
     StdAccountCreateOutput,
 } from '@sailpoint/connector-sdk'
 import { CreateUserOptions, KeeperClient } from '../client/keeper-client'
-import { buildAccountMaps, buildRecordMaps, toAccount } from '../utils/keeper-mappings'
-import { getRecordList, coerceNonEmptyStrings, requireSingleNodeId } from '../utils/helper'
+import { loadAccountView } from '../utils/account-view'
+import { coerceNonEmptyStrings, firstEntitlementValue, requireSingleNodeId } from '../utils/helper'
 
 export function createAccountCreateHandler(client: KeeperClient) {
     return async (
@@ -22,7 +21,7 @@ export function createAccountCreateHandler(client: KeeperClient) {
         // Email is the account identifier in our schema. ISC sends it either in
         // `attributes.email` or as `input.identity` (both are usually the same
         // value at create time). We accept either.
-        const email = firstEntitlementValue(attrs.email) ?? normalizeString(input?.identity)
+        const email = firstEntitlementValue(attrs.email) ?? firstEntitlementValue(input?.identity)
         if (!email) {
             throw new ConnectorError('std:account:create requires an email in attributes.email or input.identity')
         }
@@ -48,7 +47,7 @@ export function createAccountCreateHandler(client: KeeperClient) {
         )
 
         // Only forward attributes we actually know how to set on Keeper. Every
-        // other attribute (userId, status, twoFactorEnabled, aliases, nodePath)
+        // other attribute (userId, status, twoFactorEnabled, aliases)
         // is either server-controlled or a display-only mirror of the node
         // entitlement. roles / teams are optional — ISC may include them when
         // create is driven by a Role/AP that also grants those entitlements.
@@ -74,47 +73,13 @@ export function createAccountCreateHandler(client: KeeperClient) {
 
         // Fetch the fresh user + folders so ISC's stored account view
         // matches Keeper's post-invite state (status will be "Invited"
-        // until the user accepts the email and sets up their vault). 
-        const user = await client.getUser(email)
-        const folders = await client.listAllFolders()
-        const records = getRecordList(await client.listVaultTree(),await client.getWhoami()) 
-
-        if (!user) {
-            throw new ConnectorError(
-                `Keeper user "${email}" was created but could not be read back from enterprise-info. ` +
+        // until the user accepts the email and sets up their vault).
+        res.send(
+            await loadAccountView(client, email, {
+                notFoundMessage:
+                    `Keeper user "${email}" was created but could not be read back from enterprise-info. ` +
                     `Commander may still be propagating the invite; ISC will pick it up on the next aggregation.`,
-                ConnectorErrorType.NotFound
-            )
-        }
-
-        res.send(toAccount(user, buildAccountMaps(folders), buildRecordMaps(records)))
+            })
+        )
     }
-}
-
-/** Returns a trimmed non-empty string, or undefined for anything else. */
-function normalizeString(value: unknown): string | undefined {
-    if (typeof value !== 'string') return undefined
-    const trimmed = value.trim()
-    return trimmed === '' ? undefined : trimmed
-}
-
-/**
- * ISC delivers multi-valued entitlement attributes as arrays, but occasionally
- * a single scalar sneaks through (e.g., only one value assigned). Normalise
- * both shapes into a filtered array of non-empty trimmed strings.
- */
-function normalizeStringArray(value: unknown): string[] | undefined {
-    if (value == null) return undefined
-    const raw: unknown[] = Array.isArray(value) ? value : [value]
-    const result = raw.map((v) => (typeof v === 'string' ? v.trim() : '')).filter((v) => v !== '')
-    return result.length === 0 ? undefined : result
-}
-
-/**
- * Read a single-valued attribute that ISC may deliver either as a scalar string
- * (Postman/API callers) or as an array (managed entitlements like `node`, even
- * when single-valued). Returns the first non-empty trimmed value, or undefined.
- */
-function firstEntitlementValue(value: unknown): string | undefined {
-    return normalizeString(value) ?? normalizeStringArray(value)?.[0]
 }
