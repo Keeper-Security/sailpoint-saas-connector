@@ -65,7 +65,7 @@ export function createAccountCreateHandler(client: KeeperClient) {
 
         logger.info(
             `Creating Keeper vault account for "${email}" ` +
-                `(name=${createOptions.name ?? '-'}), in node "${createOptions.nodeId ?? '-'}"` +
+                `(name=${createOptions.name}), in node "${createOptions.nodeId}"` +
                 `, roles=[${addRoleValues.join(',') || '-'}]` +
                 `, teams=[${addTeamValues.join(',') || '-'}]`
         )
