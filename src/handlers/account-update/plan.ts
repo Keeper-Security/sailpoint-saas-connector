@@ -18,7 +18,6 @@ import { coerceNonEmptyStrings, getAllShareableFolders, getRecordListByEmail, no
 export const READ_ONLY_ATTRS = new Set([
     'userId',
     'status',
-    'accountStatus',
     'twoFactorEnabled',
     'aliases',
     'name',
