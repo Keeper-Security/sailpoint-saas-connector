@@ -25,7 +25,9 @@ function getChildrenRecords(childrenNode: KeeperVaultTreeNode[]): VaultRecordNod
 
     for (const childNode of childrenNode) {
         if (
-            (childNode.kind === 'shared_folder' || childNode.kind === 'folder') &&
+            (childNode.kind === 'shared_folder' ||
+                childNode.kind === 'folder' ||
+                childNode.kind === 'nested_share_folder') &&
             childNode.children !== undefined
         ) {
             records.push(...getChildrenRecords(childNode.children))

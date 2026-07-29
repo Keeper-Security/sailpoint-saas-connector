@@ -88,7 +88,7 @@ function pushFolderEntitlement(map: Map<string, string[]>, key: string, entitlem
 function addUserFolderEntitlements(map: Map<string, string[]>, folder: KeeperFolder): void {
     if (!folder.uid) return
     for (const [email, treePerms] of Object.entries(folder.userPermissions ?? {})) {
-        const key = email?.trim().toLowerCase()
+        const key = email.trim().toLowerCase()
         if (!key) continue
         const entId = folderEntitlementIdFromTreePerms(folder, treePerms)
         if (!entId) continue
@@ -99,7 +99,7 @@ function addUserFolderEntitlements(map: Map<string, string[]>, folder: KeeperFol
 function addTeamFolderEntitlements(map: Map<string, string[]>, folder: KeeperFolder): void {
     if (!folder.uid) return
     for (const [teamUid, treePerms] of Object.entries(folder.teamPermissions ?? {})) {
-        if (!teamUid?.trim()) continue
+        if (!teamUid.trim()) continue
         const entId = folderEntitlementIdFromTreePerms(folder, treePerms)
         if (!entId) continue
         pushFolderEntitlement(map, teamUid, entId)
