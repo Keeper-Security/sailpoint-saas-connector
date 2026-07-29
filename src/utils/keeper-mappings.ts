@@ -235,20 +235,13 @@ export function toAccount(user: KeeperUser, maps: AccountMaps, recordMaps: Recor
     return {
         identity: user.email,
         uuid: String(user.user_id),
-        // Deliberately omit the `locked` flag. Keeper's `Locked` status maps
-        // to ISC "Disabled" (via `disabled` above) because our
-        // std:account:disable/enable handlers use `enterprise-user --lock/
-        // --unlock` under the hood. Setting `locked: true` would make ISC
-        // suppress the Enable/Disable action and look for an unlock command
-        // we don't publish. The raw Keeper state is still readable in
-        // `attributes.status` for reporting and filtering.
         disabled,
+        locked: disabled,
         attributes: {
             userId: String(user.user_id),
             email: user.email,
             name: user.name ?? '',
             status,
-            accountStatus: user.status ?? '',
             jobTitle: user.job_title ?? '',
             twoFactorEnabled: user['2fa_enabled'] ?? false,
             aliases: user.alias ?? [],
