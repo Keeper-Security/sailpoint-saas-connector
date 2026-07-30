@@ -73,6 +73,7 @@ export function getRecordList(vaultTree: KeeperVaultTreeData): KeeperRecord[] {
     const nsfPermissions = vaultTree.share_permissions_key.nsf
     // MU/MR are folder-share flags on classic maps — exclude from record entitlements.
     const classicCodes = Object.keys(classicPermissions).filter((code) => code !== 'MU' && code !== 'MR')
+    const nsfCodes = Object.keys(nsfPermissions)
 
     const children = vaultTree.tree?.children || []
     const filterRecords = getChildrenRecords(children)
@@ -80,40 +81,25 @@ export function getRecordList(vaultTree: KeeperVaultTreeData): KeeperRecord[] {
 
     for (const record of filterRecords) {
         const users = record.userPermissions.users ?? []
-        if (record.recordCategory === 'classic') {
-            for (const permission of classicCodes) {
-                const getUsers = users
-                    .filter((user) => user.permissions.includes(permission))
-                    .map((user) => user.email)
+        const permissionMap =
+            record.recordCategory === 'classic' ? classicPermissions : nsfPermissions
+        const permissionCodes = record.recordCategory === 'classic' ? classicCodes : nsfCodes
 
-                sailEntitlements.push({
-                    record_uid: record.recordUid,
-                    record_uid_perm: `${record.recordUid}:${permission}`,
-                    title: record.title,
-                    record_category: record.recordCategory,
-                    type: record.type,
-                    path: record.path,
-                    permission: classicPermissions[permission],
-                    users: getUsers,
-                })
-            }
-        } else {
-            for (const permission of Object.keys(nsfPermissions)) {
-                const getUsers = users
-                    .filter((user) => user.permissions.includes(permission))
-                    .map((user) => user.email)
+        for (const permission of permissionCodes) {
+            const getUsers = users
+                .filter((user) => user.permissions.includes(permission))
+                .map((user) => user.email)
 
-                sailEntitlements.push({
-                    record_uid: record.recordUid,
-                    record_uid_perm: `${record.recordUid}:${permission}`,
-                    title: record.title,
-                    record_category: record.recordCategory,
-                    type: record.type,
-                    path: record.path,
-                    permission: nsfPermissions[permission],
-                    users: getUsers,
-                })
-            }
+            sailEntitlements.push({
+                record_uid: record.recordUid,
+                record_uid_perm: `${record.recordUid}:${permission}`,
+                title: record.title,
+                record_category: record.recordCategory,
+                type: record.type,
+                path: record.path,
+                permission: permissionMap[permission],
+                users: getUsers,
+            })
         }
     }
 

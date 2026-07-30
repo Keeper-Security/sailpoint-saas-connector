@@ -85,8 +85,10 @@ async function applyFolderChanges(
             logger.info(`Removing folder share ${uid} from ${email} (${folder.folderType})`)
             if (folder.folderType === 'classic') {
                 await client.removeClassicFolderShare(uid, email)
-            } else {
+            } else if (folder.folderType === 'nsf') {
                 await client.removeNsfFolderShare(uid, email)
+            } else {
+                throw new ConnectorError(`unsupported folderType "${folder.folderType}" when removing folder share`)
             }
         } catch (err) {
             failures.push(folderFailure('remove', id, err))
@@ -106,8 +108,10 @@ async function applyFolderChanges(
             if (folder.folderType === 'classic') {
                 const flags = classicFlags(permission as ClassicPermission)
                 await client.grantClassicFolderShare(uid, email, flags.manageUsers, flags.manageRecords)
-            } else {
+            } else if (folder.folderType === 'nsf') {
                 await client.grantNsfFolderShare(uid, email, nsfRoleForCode(permission as NsfPermission))
+            } else {
+                throw new ConnectorError(`unsupported folderType "${folder.folderType}" when granting folder share`)
             }
         } catch (err) {
             failures.push(folderFailure('grant', id, err))

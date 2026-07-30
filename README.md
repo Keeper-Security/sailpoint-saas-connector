@@ -55,30 +55,118 @@ Before configuring a source in ISC, ensure the following:
 
 ## Commander Service Mode Setup
 
-In order to communicate between the Keeper Security SaaS Connector and Keeper, and to maintain zero knowledge and full end-to-end encryption, the Commander Service Mode are hosted by each customer on their own infrastructure to interact with the source.
+To keep zero-knowledge and end-to-end encryption, **Commander Service Mode** runs on your infrastructure and is the only path the SailPoint connector uses to talk to Keeper.
 
-To enable the source to authenticate and execute commands within the Keeper tenant, an authorized Keeper Commander configuration file must be created. This configuration can be generated on a host computer or workstation.
+Use `sailpoint-app-setup` to create the Docker-based Service Mode deployment and SailPoint-specific settings in one flow.
 
-- [Install Keeper Commander](https://docs.keeper.io/keeperpam/commander-cli/commander-installation-setup) locally on your machine
-- If required, create a new Keeper service account dedicated to this integration, ensuring it has access to the relevant records and folders and the ability to perform record and folder sharing.
-- Login to Commander with the Keeper Service account (```serviceuser@company.com```)
+### Before you start
 
-# TODO 
-add below in detail for ```sailpoint-app-setup``` command
+1. [Install Keeper Commander](https://docs.keeper.io/keeperpam/commander-cli/commander-installation-setup) on a workstation.
+2. Prefer a dedicated Keeper **service account** with rights to manage enterprise users and to share the folders/records you will govern from ISC.
+3. Log in to Commander with that account:
 
-### Tunneling Configuration (Optional)
+```
+keeper shell
+login serviceuser@company.com
+```
 
-If external access is required, configure one of the following:
+4. Ensure Docker is available on the host where Service Mode will run.
+
+### Run SailPoint setup
+
+```
+My Vault> sailpoint-app-setup
+```
+
+The command runs in two phases and writes a `docker-compose.yml` with a **Commander-only** service (no separate SailPoint container).
+
+#### Phase 1 — Service Mode / Docker
+
+Creates the shared folder, Docker config record, KSM application, and client config, then prompts for:
 
 | Prompt | Description |
 |---|---|
-| Ngrok Auth Token | Your ngrok authentication token for public URL generation. |
-| Ngrok Custom Domain | Custom ngrok domain (e.g., `myapp.ngrok.io`). |
-| Cloudflare Tunnel Token | Cloudflare tunnel token for public URL generation. |
-| Cloudflare Custom Domain | Your Cloudflare domain (e.g., `slack.company.com`). |
+| **Port** | Local port for Commander Service Mode. Default: `8900`. |
+| **Enable ngrok?** | Optional public URL via ngrok. Default: No. |
+| **Ngrok Auth Token** | Required if ngrok is enabled. |
+| **Ngrok Custom Domain** | Optional (for example `myapp.ngrok.io`). Press Enter to skip. |
+| **Enable Cloudflare?** | Asked only if ngrok is disabled. Default: No. |
+| **Cloudflare Tunnel Token** | Required if Cloudflare is enabled. |
+| **Cloudflare Custom Domain** | Required if Cloudflare is enabled (for example `commander.company.com`). |
 
-> Ngrok and Cloudflare are mutually exclusive. Choose one if needed. This is NOT a requirement for the Slack App. But if you are using other integrations such as our Jira app, you might need to set up a cloud tunnel.
+> **Ngrok and Cloudflare are mutually exclusive.** For SailPoint ISC (SaaS), the Service Mode URL must be reachable from SailPoint’s connector runtime. If Commander is on a private network, enable **ngrok** or **Cloudflare Tunnel** and use that public HTTPS URL as **Keeper Commander Service Mode API URL** in the source.
 
+Queue mode (API v2) is enabled automatically. The command allowlist is limited to SailPoint-safe operations (user lifecycle and sharing). Secret-bearing commands such as `get`, `export`, and `find-password` are excluded.
+
+#### Phase 2 — SailPoint options
+
+| Prompt | Description |
+|---|---|
+| **Scope** | Which share entitlements Service Mode may manage: `folders`, `records`, or `both`. Default: `both`. |
+| **Interval seconds** | How often Commander re-checks invited users and applies queued entitlements after they become **Active**. Default: `60`. Minimum: `15`. |
+
+Resources created (defaults):
+
+| Resource | Default name |
+|---|---|
+| Shared folder | `Commander Service Mode - SailPoint` |
+| KSM application | `Commander Service Mode - KSM App` |
+| Docker config record | `Commander Service Mode Docker Config` |
+| SailPoint config record | `Commander Service Mode SailPoint Config` |
+| Docker service / container | `commander-sailpoint` / `keeper-service-sailpoint` |
+
+> Re-running setup rewrites `docker-compose.yml` (manual edits are lost) but preserves queued pending entitlements on the SailPoint config record.
+
+### Deploy
+
+```
+My Vault> quit
+rm ~/.keeper/config.json
+docker compose up -d
+docker ps
+docker logs keeper-service-sailpoint
+curl http://localhost:<port>/health
+```
+
+Delete the local `config.json` before starting Docker so the container does not conflict with the same device token. Docker loads its own config through KSM.
+
+### Values for the ISC source
+
+After the service is healthy:
+
+1. **Keeper Commander Service Mode API URL** — public base URL **without** `/api/v2/` (tunnel URL if you enabled ngrok/Cloudflare, otherwise your reachable host URL).
+2. **Keeper Commander Service Mode API Key** — from the Docker/service config record created during setup (stored in the vault after the container starts Service Mode).
+
+Use those values in [Source configuration](#source-configuration).
+
+### Deferred entitlements (Invited users)
+
+Keeper cannot fully apply some entitlements until the user is **Active**. Commander queues role, team, folder, and record grants requested while the user is still **Invited**, then applies them after activation (on the poll interval from Phase 2).
+
+This matches ISC create behavior: initial **roles** / **teams** on create are applied once the user becomes active.
+
+### Optional CLI flags
+
+```
+My Vault> sailpoint-app-setup \
+  --folder-name "Commander Service Mode - SailPoint" \
+  --app-name "Commander Service Mode - KSM App" \
+  --config-record-name "Commander Service Mode Docker Config" \
+  --sailpoint-record-name "Commander Service Mode SailPoint Config" \
+  --skip-device-setup
+```
+
+| Flag | Description |
+|---|---|
+| `--folder-name` | Shared folder name |
+| `--app-name` | KSM application name |
+| `--config-record-name` | Docker/service config record name |
+| `--sailpoint-record-name` | SailPoint config record name |
+| `--config-path` | Path to Commander `config.json` |
+| `--timeout` | Device timeout (default: `30d`) |
+| `--skip-device-setup` | Skip device registration if already configured |
+
+---
 
 ## Install from the Marketplace
 

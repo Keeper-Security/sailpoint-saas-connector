@@ -42,7 +42,7 @@ export interface CreateUserOptions {
 /**
  * Snapshot of the Keeper Commander session backing this connector. Populated
  * during `testConnection` and cached on the client so subsequent handlers can
- * read it without a round-trip. Sourced from Commander's `whoami --json`.
+ * read it without a round-trip. Sourced from Commander's `whoami`.
  */
 export interface WhoamiInfo {
     /** Email of the Commander service account driving this connector. */
@@ -219,7 +219,7 @@ export class KeeperClient {
     }
 
     /**
-     * Actually hit Commander's `whoami --json`. No syncVault / syncEnterprise
+     * Actually hit Commander's `whoami`. No syncVault / syncEnterprise
      * needed because whoami is a session lookup, not vault or enterprise data.
      */
     private async fetchWhoami(): Promise<WhoamiInfo> {
@@ -363,6 +363,7 @@ export class KeeperClient {
             await this.runCommand(this.createRecordCommand(v, options.email) + ' --action revoke')
         }
     }
+
     private createRecordCommand(recordId: string, email: string): string {
         const assign_perm = recordId.split(':')[1]
 
@@ -373,7 +374,6 @@ export class KeeperClient {
                 return `share-record -e ${email} "${recordId.split(':')[0]}" --write`
             case 'CS':
                 return `share-record -e ${email} "${recordId.split(':')[0]}" --share`
-
             case 'VW':
                 return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r viewer`
             case 'SM':
@@ -447,7 +447,7 @@ export class KeeperClient {
     }
 
     /**
-     * All classic/NSF shareable folders from the vault tree (no whoami filter).
+     * All classic/NSF shareable folders from the vault tree.
      * Used for entitlement aggregation and account/team folder attributes.
      */
     async listAllFolders(): Promise<KeeperFolder[]> {
