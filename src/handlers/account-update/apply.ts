@@ -152,8 +152,6 @@ async function applyRecordChanges(
         }
     }
 
-
-
     return failures
 }
 
