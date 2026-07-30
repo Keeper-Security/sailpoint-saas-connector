@@ -87,7 +87,6 @@ describe('folder-permissions', () => {
             expect(nsfEntitlementFromTreePerms(['CM'])).toBe('CM')
             expect(nsfEntitlementFromTreePerms(['SM'])).toBe('SM')
             expect(nsfEntitlementFromTreePerms(['VW'])).toBe('VW')
-            expect(nsfEntitlementFromTreePerms(['CT'])).toBe('VW')
             expect(nsfEntitlementFromTreePerms([])).toBeNull()
         })
 

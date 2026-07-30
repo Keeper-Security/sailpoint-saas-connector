@@ -105,8 +105,8 @@ export function classicEntitlementFromTreePerms(perms: string[]): ClassicPermiss
 }
 
 /**
- * Map NSF tree ACL codes (VW, SM, CM, CSM, FM, OW, CT, …) to a connector entitlement code.
- * Highest role wins when multiple are present. OW → FM; CT → VW (closest existing code).
+ * Map NSF tree ACL codes (VW, SM, CM, CSM, FM, OW, …) to a connector entitlement code.
+ * Highest role wins when multiple are present. OW → FM.
  */
 export function nsfEntitlementFromTreePerms(perms: string[]): NsfPermission | null {
     const set = new Set(perms)
@@ -114,7 +114,7 @@ export function nsfEntitlementFromTreePerms(perms: string[]): NsfPermission | nu
     if (set.has('CSM')) return 'CSM'
     if (set.has('CM')) return 'CM'
     if (set.has('SM')) return 'SM'
-    if (set.has('VW') || set.has('CT')) return 'VW'
+    if (set.has('VW')) return 'VW'
     return null
 }
 
