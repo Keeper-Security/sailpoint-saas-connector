@@ -117,18 +117,33 @@ export function createEntitlementReadHandler(client: KeeperClient) {
                 return
             }
 
-            case "record": {
+            case 'record': {
+                // Same identity shape as folders: "<recordUid>:<permission>".
+                const { uid, permission } = parseFolderEntitlementId(identity)
                 const vaultTree = await client.listVaultTree()
-
-                let records = getRecordList(vaultTree)
-
-                records = records.filter((r) => (r.users ?? []).includes(identity))
-
-                for (const record of records) {
-                    res.send(toRecordEntitlement(record))
+                const records = getRecordList(vaultTree)
+                const forUid = records.filter((r) => r.record_uid === uid)
+                if (forUid.length === 0) {
+                    throw new ConnectorError(
+                        `Keeper record with uid "${uid}" not found`,
+                        ConnectorErrorType.NotFound
+                    )
                 }
+                if (!permission) {
+                    throw new ConnectorError(
+                        `Record entitlement id must be "uid:permission", got "${identity}"`,
+                        ConnectorErrorType.NotFound
+                    )
+                }
+                const record = forUid.find((r) => r.record_uid_perm === `${uid}:${permission}`)
+                if (!record) {
+                    throw new ConnectorError(
+                        `Invalid permission "${permission}" for record "${uid}" (id "${identity}")`,
+                        ConnectorErrorType.NotFound
+                    )
+                }
+                res.send(toRecordEntitlement(record))
                 return
-
             }
 
             default:

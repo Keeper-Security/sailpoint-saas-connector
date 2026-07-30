@@ -316,8 +316,36 @@ describe('entitlement handlers', () => {
                 createMockResponse().res
             )
         ).rejects.toThrow(ConnectorError)
+
+        const { res: rRecord, sent: sRecord } = createMockResponse()
+        await handler(
+            createMockContext(),
+            { type: 'record', identity: 'rec-classic-001:RO' } as any,
+            rRecord
+        )
+        expect(sRecord[0].type).toBe('record')
+        expect(sRecord[0].identity).toBe('rec-classic-001:RO')
+
         await expect(
-            handler(createMockContext(), { type: 'record', identity: 'x' } as any, createMockResponse().res)
+            handler(createMockContext(), { type: 'record', identity: 'missing:RO' } as any, createMockResponse().res)
+        ).rejects.toThrow(/record with uid "missing" not found/)
+        await expect(
+            handler(
+                createMockContext(),
+                { type: 'record', identity: 'rec-classic-001' } as any,
+                createMockResponse().res
+            )
+        ).rejects.toThrow(/uid:permission/)
+        await expect(
+            handler(
+                createMockContext(),
+                { type: 'record', identity: 'rec-classic-001:XX' } as any,
+                createMockResponse().res
+            )
+        ).rejects.toThrow(/Invalid permission/)
+
+        await expect(
+            handler(createMockContext(), { type: 'unknown', identity: 'x' } as any, createMockResponse().res)
         ).rejects.toThrow(/Unsupported entitlement type/)
     })
 })
