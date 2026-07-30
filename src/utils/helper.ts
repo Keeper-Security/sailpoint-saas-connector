@@ -20,6 +20,8 @@ interface VaultRecordNode {
     userPermissions: KeeperUserSharePermissions
 }
 
+export const SUPPORTED_TYPES = ['node', 'team', 'role', 'folder', 'record'] as const
+
 function getChildrenRecords(childrenNode: KeeperVaultTreeNode[]): VaultRecordNode[] {
     const records: VaultRecordNode[] = []
 
@@ -54,7 +56,7 @@ export function getRecordListByEmail(email: string, vaultTree: KeeperVaultTreeDa
     const userRecordPerm: string[] = []
 
     for (const record of filterRecords) {
-        const matchedUsers = (record.userPermissions.users ?? []).filter((user) => user.email === email)
+        const matchedUsers = (record.userPermissions.users ?? []).filter((user) => normalizeEmail(user.email) === normalizeEmail(email))
         if (matchedUsers.length > 0) {
             for (const permission of matchedUsers[0].permissions ?? []) {
                 userRecordPerm.push(`${record.recordUid}:${permission}`)

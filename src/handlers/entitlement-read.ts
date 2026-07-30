@@ -16,12 +16,12 @@ import {
     toNodeEntitlement,
     toRoleEntitlement,
     toTeamEntitlement,
+    toRecordEntitlement,
 } from '../utils/keeper-mappings'
 import { FolderPermission, isValidPermission, parseFolderEntitlementId } from '../utils/folder-permissions'
-import { getAllShareableFolders } from '../utils/helper'
+import { getAllShareableFolders, getRecordList } from '../utils/helper'
 import { safeKeyId } from '../utils/identity'
-
-const SUPPORTED_TYPES = ['node', 'team', 'role', 'folder'] as const
+import { SUPPORTED_TYPES } from '../utils/helper'
 
 export function createEntitlementReadHandler(client: KeeperClient) {
     return async (
@@ -40,6 +40,13 @@ export function createEntitlementReadHandler(client: KeeperClient) {
         }
 
         logger.info(`Reading Keeper ${type} entitlement ${identity}`)
+
+        await client.syncVault()
+        logger.info('Synced vault while listing entitlements')
+        await client.syncEnterprise()
+        logger.info('Synced enterprise while listing entitlements')
+
+
 
         switch (type) {
             case 'node': {
@@ -102,12 +109,26 @@ export function createEntitlementReadHandler(client: KeeperClient) {
                 if (!permission || !isValidPermission(folder.folderType, permission)) {
                     throw new ConnectorError(
                         `Invalid permission "${permission ?? ''}" for folderType "${folder.folderType}" ` +
-                            `(id "${identity}")`,
+                        `(id "${identity}")`,
                         ConnectorErrorType.NotFound
                     )
                 }
                 res.send(toFolderEntitlement(folder, permission as FolderPermission))
                 return
+            }
+
+            case "record": {
+                const vaultTree = await client.listVaultTree()
+
+                let records = getRecordList(vaultTree)
+
+                records = records.filter((r) => (r.users ?? []).includes(identity))
+
+                for (const record of records) {
+                    res.send(toRecordEntitlement(record))
+                }
+                return
+
             }
 
             default:
