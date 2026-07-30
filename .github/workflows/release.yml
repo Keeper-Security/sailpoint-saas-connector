@@ -23,6 +23,7 @@ jobs:
   publish:
     needs: test
     runs-on: ubuntu-latest
+    environment: prod
     permissions:
       contents: write
     env:
@@ -45,13 +46,22 @@ jobs:
             exit 1
           fi
 
+      - name: Load secrets from Keeper
+        uses: Keeper-Security/ksm-action@37abbada28637b6478ba845e73d3f8b9676572fe  # master
+        with:
+          keeper-secret-config: ${{ secrets.KSM_SAILPOINT_CONFIG }}
+          secrets: |
+            <RECORD_UID>/field/url > env:SAIL_BASE_URL
+            <RECORD_UID>/field/login > env:SAIL_CLIENT_ID
+            <RECORD_UID>/field/password > env:SAIL_CLIENT_SECRET
+
       - name: Upload connector to ISC
         uses: sailpoint-oss/upload-saas-connector@5d4913a4134a7609a2b16fa21b02c3601b51f7a9  # v1
         with:
           connector-alias: ${{ vars.CONNECTOR_ALIAS }}
-          base-url: ${{ secrets.SAIL_BASE_URL }}
-          client-id: ${{ secrets.SAIL_CLIENT_ID }}
-          client-secret: ${{ secrets.SAIL_CLIENT_SECRET }}
+          base-url: ${{ env.SAIL_BASE_URL }}
+          client-id: ${{ env.SAIL_CLIENT_ID }}
+          client-secret: ${{ env.SAIL_CLIENT_SECRET }}
           node-version: '20'
 
       - name: Create GitHub Release
