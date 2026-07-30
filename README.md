@@ -102,8 +102,13 @@ Queue mode (API v2) is enabled automatically. The command allowlist is limited t
 
 | Prompt | Description |
 |---|---|
-| **Scope** | Which share entitlements Service Mode may manage: `folders`, `records`, or `both`. Default: `both`. |
+| **Allow folder shares?** | Whether SailPoint may manage folder share entitlements (`share-folder` / `nsf-share-folder`). Default: Yes. |
+| **Allow record shares?** | Whether SailPoint may manage record share entitlements (`share-record` / `nsf-share-record`). Default: Yes. |
+| **Allow role assignment?** | Whether SailPoint may assign roles via `enterprise-user` / `enterprise-role`. Default: Yes. |
+| **Allow team assignment?** | Whether SailPoint may assign teams via `enterprise-user`. Default: Yes. |
 | **Interval seconds** | How often Commander re-checks invited users and applies queued entitlements after they become **Active**. Default: `60`. Minimum: `15`. |
+
+> Disabled capabilities are rejected by Service Mode (HTTP 403). Nodes are never gated — `--node` remains available for invites and moves.
 
 Resources created (defaults):
 
@@ -249,9 +254,9 @@ Optional on create: **jobTitle**, initial **roles** / **teams** (Note: These **r
 
 Configure a **Create Account** provisioning policy so ISC can populate required attributes (including dynamic **node** mapping via transforms when needed).
 
-### 4. Folders and records
+### 4. Entitlement capability gates
 
-Folder and record entitlements represent shareable access governed through the Commander service account. Plan which folders/records should be in scope for IGA before enabling wide entitlement aggregation or assignment.
+During `sailpoint-app-setup`, choose which entitlement types Service Mode may manage: **folders**, **records**, **roles**, and **teams** (each Yes/No, default Yes). Plan which types should be in scope for IGA before enabling wide aggregation or assignment. Nodes are always allowed.
 
 ---
 
