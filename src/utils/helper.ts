@@ -20,6 +20,8 @@ interface VaultRecordNode {
     userPermissions: KeeperUserSharePermissions
 }
 
+export const SUPPORTED_TYPES = ['node', 'team', 'role', 'folder', 'record'] as const
+
 function getChildrenRecords(childrenNode: KeeperVaultTreeNode[]): VaultRecordNode[] {
     const records: VaultRecordNode[] = []
 

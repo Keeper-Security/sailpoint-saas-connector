@@ -21,8 +21,7 @@ import {
 import { FolderPermission, isValidPermission, parseFolderEntitlementId } from '../utils/folder-permissions'
 import { getAllShareableFolders, getRecordList } from '../utils/helper'
 import { safeKeyId } from '../utils/identity'
-
-const SUPPORTED_TYPES = ['node', 'team', 'role', 'folder', 'record'] as const
+import { SUPPORTED_TYPES } from '../utils/helper'
 
 export function createEntitlementReadHandler(client: KeeperClient) {
     return async (
@@ -47,7 +46,7 @@ export function createEntitlementReadHandler(client: KeeperClient) {
         await client.syncEnterprise()
         logger.info('Synced enterprise while listing entitlements')
 
-        
+
 
         switch (type) {
             case 'node': {
@@ -110,7 +109,7 @@ export function createEntitlementReadHandler(client: KeeperClient) {
                 if (!permission || !isValidPermission(folder.folderType, permission)) {
                     throw new ConnectorError(
                         `Invalid permission "${permission ?? ''}" for folderType "${folder.folderType}" ` +
-                            `(id "${identity}")`,
+                        `(id "${identity}")`,
                         ConnectorErrorType.NotFound
                     )
                 }
@@ -118,14 +117,13 @@ export function createEntitlementReadHandler(client: KeeperClient) {
                 return
             }
 
-            case "record":{
+            case "record": {
                 const vaultTree = await client.listVaultTree()
 
                 let records = getRecordList(vaultTree)
 
                 records = records.filter((r) => (r.users ?? []).includes(identity))
 
-                console.log("entitlement read record", records);
                 for (const record of records) {
                     res.send(toRecordEntitlement(record))
                 }

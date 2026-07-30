@@ -17,8 +17,7 @@ import {
     toRecordEntitlement,
 } from '../utils/keeper-mappings'
 import { getAllShareableFolders, getRecordList } from '../utils/helper'
-
-const SUPPORTED_TYPES = ['node', 'team', 'role', 'folder', 'record'] as const
+import { SUPPORTED_TYPES } from '../utils/helper'
 
 export function createEntitlementListHandler(client: KeeperClient) {
     return async (
