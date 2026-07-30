@@ -365,9 +365,9 @@ export class KeeperClient {
     }
 
     private createRecordCommand(recordId: string, email: string): string {
-        const assign_perm = recordId.split(':')[1]
+        const assignPerm = recordId.split(':')[1]
 
-        switch (assign_perm) {
+        switch (assignPerm) {
             case 'RO':
                 return `share-record -e ${email} "${recordId.split(':')[0]}"`
             case 'CE':
@@ -387,7 +387,7 @@ export class KeeperClient {
             case 'OW':
                 throw new ConnectorError(`Ownership change is restricted. Please perform this action on Keeper Vault.`)
             default:
-                throw new ConnectorError(`Invalid permission: ${assign_perm}`)
+                throw new ConnectorError(`Invalid permission: ${assignPerm}`)
         }
     }
 

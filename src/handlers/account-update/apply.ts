@@ -134,6 +134,15 @@ async function applyRecordChanges(
 ): Promise<OperationFailure[]> {
     const failures: OperationFailure[] = []
 
+    for (const id of removes) {
+        try {
+            await client.updateRecordPermissions({ email, removeRecordValues: [id] })
+        } catch (err) {
+            failures.push(recordFailure('revoke', id, err))
+            logger.warn(`Record revoke failed for ${id}: ${errorMessage(err)}`)
+        }
+    }
+
     for (const id of adds) {
         try {
             await client.updateRecordPermissions({ email, addRecordValues: [id] })
@@ -143,14 +152,7 @@ async function applyRecordChanges(
         }
     }
 
-    for (const id of removes) {
-        try {
-            await client.updateRecordPermissions({ email, removeRecordValues: [id] })
-        } catch (err) {
-            failures.push(recordFailure('revoke', id, err))
-            logger.warn(`Record revoke failed for ${id}: ${errorMessage(err)}`)
-        }
-    }
+
 
     return failures
 }
