@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm test
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+
+      - name: Read version
+        id: version
+        run: echo "value=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
+
+      - name: Fail if version already released
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          if gh release view "v${VERSION}" > /dev/null 2>&1; then
+            echo "::error::Release v${VERSION} already exists. Bump the version in package.json before merging to main."
+            exit 1
+          fi
+
+      - name: Upload connector to ISC
+        uses: sailpoint-oss/upload-saas-connector@5d4913a4134a7609a2b16fa21b02c3601b51f7a9  # v1
+        with:
+          connector-alias: ${{ vars.CONNECTOR_ALIAS }}
+          base-url: ${{ secrets.SAIL_BASE_URL }}
+          client-id: ${{ secrets.SAIL_CLIENT_ID }}
+          client-secret: ${{ secrets.SAIL_CLIENT_SECRET }}
+          node-version: '20'
+
+      - name: Create GitHub Release
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          gh release create "v${VERSION}" \
+            ./dist/keeper-security-*.zip \
+            --generate-notes \
+            --title "v${VERSION}"
