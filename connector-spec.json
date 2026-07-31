@@ -1,0 +1,356 @@
+{
+	"name": "Keeper Security",
+	"commands": [
+		"std:account:list",
+		"std:account:read",
+		"std:account:create",
+		"std:account:update",
+		"std:account:delete",
+		"std:account:disable",
+		"std:account:enable",
+		"std:entitlement:list",
+		"std:entitlement:read",
+		"std:test-connection"
+	],
+	"sourceConfig": [
+		{
+			"type": "menu",
+			"label": "Configuration",
+			"items": [
+				{
+					"type": "section",
+					"sectionTitle": "Authentication",
+					"sectionHelpMessage": "Provide connection parameters to interact securely with the target application.",
+					"items": [
+						{
+							"key": "serviceModeApiUrl",
+							"label": "Keeper Commander Service Mode API URL",
+							"type": "text",
+							"required": true,
+							"placeholder": "Your Base API URL Here ( without /api/v2/)"
+						},
+						{
+							"key": "serviceModeApiKey",
+							"label": "Keeper Commander Service Mode API Key",
+							"type": "secret",
+							"required": true,
+							"placeholder": "Your API Key Here"
+						},
+						{
+							"key": "pollTimeoutSeconds",
+							"label": "Keeper Service Mode Poll Timeout (seconds)",
+							"type": "text",
+							"required": false,
+							"placeholder": "Default is 60 seconds"
+						}
+					]
+				}
+			]
+		}
+	],
+	"accountSchema": {
+		"displayAttribute": "name",
+		"identityAttribute": "email",
+		"attributes": [
+			{
+				"name": "userId",
+				"type": "string",
+				"description": "Keeper enterprise user_id (stable numeric ID as string)"
+			},
+			{
+				"name": "email",
+				"type": "string",
+				"description": "Primary email address; used as the account identifier",
+				"required": true
+			},
+			{
+				"name": "name",
+				"type": "string",
+				"description": "Full name as stored in Keeper",
+				"required": true
+			},
+			{
+				"name": "status",
+				"type": "string",
+				"description": "Keeper enterprise user status (Invited, Active, Locked, etc.)"
+			},
+			{
+				"name": "jobTitle",
+				"type": "string",
+				"description": "Job title"
+			},
+			{
+				"name": "twoFactorEnabled",
+				"type": "boolean",
+				"description": "Whether 2FA is enabled on the vault"
+			},
+			{
+				"name": "aliases",
+				"type": "string",
+				"description": "Alternate email aliases",
+				"multi": true
+			},
+			{
+				"name": "node",
+				"type": "string",
+				"description": "Enterprise node the user belongs to (single-valued entitlement). Required on create because Keeper enterprise users must be placed in a node.",
+				"entitlement": true,
+				"managed": true,
+				"multi": false,
+				"required": true,
+				"schemaObjectType": "node"
+			},
+			{
+				"name": "teams",
+				"type": "string",
+				"description": "Team memberships (team_uid values)",
+				"entitlement": true,
+				"managed": true,
+				"multi": true,
+				"schemaObjectType": "team"
+			},
+			{
+				"name": "roles",
+				"type": "string",
+				"description": "Direct role memberships (role_id values)",
+				"entitlement": true,
+				"managed": true,
+				"multi": true,
+				"schemaObjectType": "role"
+			},
+			{
+				"name": "folders",
+				"type": "string",
+				"description": "Folder entitlements from the vault tree: classic shared folders and NSF folders as <folderUid>:<permission>; non-sharable plain folders as raw <folderUid>. Classic: NP|MU|MR|MUR. NSF: VW|SM|CM|CSM|FM.",
+				"entitlement": true,
+				"managed": true,
+				"multi": true,
+				"schemaObjectType": "folder"
+			},
+			{
+				"name": "records",
+				"type": "string",
+				"description": "Classic/NSF records shared directly to this user.",
+				"entitlement": true,
+				"managed": true,
+				"multi": true,
+				"schemaObjectType": "record"
+			}
+		]
+	},
+	"entitlementSchemas": [
+		{
+			"type": "node",
+			"displayAttribute": "path",
+			"identityAttribute": "id",
+			"attributes": [
+				{
+					"name": "id",
+					"type": "string",
+					"description": "node_id (stable numeric ID as string)"
+				},
+				{
+					"name": "name",
+					"type": "string",
+					"description": "Node display name"
+				},
+				{
+					"name": "path",
+					"type": "string",
+					"description": "Full node path (e.g. Metron Security\\Dev Node2)"
+				},
+				{
+					"name": "parentId",
+					"type": "string",
+					"description": "Parent node_id"
+				},
+				{
+					"name": "parentPath",
+					"type": "string",
+					"description": "Parent node path"
+				},
+				{
+					"name": "isolated",
+					"type": "boolean",
+					"description": "Whether the node is isolated"
+				}
+			]
+		},
+		{
+			"type": "team",
+			"displayAttribute": "name",
+			"identityAttribute": "id",
+			"attributes": [
+				{
+					"name": "id",
+					"type": "string",
+					"description": "team_uid"
+				},
+				{
+					"name": "name",
+					"type": "string",
+					"description": "Team display name"
+				},
+				{
+					"name": "nodeId",
+					"type": "string",
+					"description": "Owning node_id"
+				},
+				{
+					"name": "nodePath",
+					"type": "string",
+					"description": "Owning node path"
+				},
+				{
+					"name": "restricts",
+					"type": "string",
+					"description": "Raw Keeper restrict flags (e.g. '  W S'); decoded attributes may be added later"
+				},
+				{
+					"name": "folders",
+					"type": "string",
+					"description": "Folder entitlements from the vault tree: classic/NSF as <folderUid>:<permission>; non-sharable plain folders as raw <folderUid>. Classic: NP|MU|MR|MUR. NSF: VW|SM|CM|CSM|FM.",
+					"multi": true,
+					"entitlement": true,
+					"schemaObjectType": "folder"
+				}
+			]
+		},
+		{
+			"type": "role",
+			"displayAttribute": "name",
+			"identityAttribute": "id",
+			"attributes": [
+				{
+					"name": "id",
+					"type": "string",
+					"description": "role_id (stable numeric ID as string)"
+				},
+				{
+					"name": "name",
+					"type": "string",
+					"description": "Role display name"
+				},
+				{
+					"name": "nodeId",
+					"type": "string",
+					"description": "Owning node_id"
+				},
+				{
+					"name": "nodePath",
+					"type": "string",
+					"description": "Owning node path"
+				},
+				{
+					"name": "admin",
+					"type": "boolean",
+					"description": "Whether this is an administrator role"
+				},
+				{
+					"name": "defaultRole",
+					"type": "boolean",
+					"description": "Whether the role is assigned to new users by default"
+				},
+				{
+					"name": "visibleBelow",
+					"type": "boolean",
+					"description": "Whether the role is visible to child nodes"
+				}
+			]
+		},
+		{
+			"type": "folder",
+			"displayAttribute": "name",
+			"identityAttribute": "id",
+			"attributes": [
+				{
+					"name": "id",
+					"type": "string",
+					"description": "Folder entitlement id: <folderUid>:<permission> for classic/NSF, or raw folderUid for non-sharable. Classic NP|MU|MR|MUR. NSF VW|SM|CM|CSM|FM"
+				},
+				{
+					"name": "uid",
+					"type": "string",
+					"description": "Raw Keeper folder UID (without permission suffix)"
+				},
+				{
+					"name": "name",
+					"type": "string",
+					"description": "Folder name; sharable folders include permission label, e.g. New Demo [Manage records]"
+				},
+				{
+					"name": "path",
+					"type": "string",
+					"description": "Folder path (same for all permissions of one folder)"
+				},
+				{
+					"name": "folderType",
+					"type": "string",
+					"description": "classic, nsf, or non-sharable"
+				},
+				{
+					"name": "parentId",
+					"type": "string",
+					"description": "Parent folder UID (absent for vault root children)"
+				},
+				{
+					"name": "permission",
+					"type": "string",
+					"description": "Permission code for classic/NSF; absent for non-sharable. Classic: NP, MU, MR, MUR. NSF: VW, SM, CM, CSM, FM"
+				},
+				{
+					"name": "permissionLabel",
+					"type": "string",
+					"description": "Human-readable permission label"
+				}
+			]
+		},
+		{
+			"type": "record",
+			"displayAttribute": "displayName",
+			"identityAttribute": "id",
+			"attributes": [
+				{
+					"name": "id",
+					"type": "string",
+					"description": "Composite entitlement id: {record_uid}:{permission} (e.g. abc123:edit)"
+				},
+				{
+					"name": "displayName",
+					"type": "string",
+					"description": "Assignment UI label formatted as '{name} [{permission}]' (e.g. Payroll DB [edit])"
+				},
+				{
+					"name": "name",
+					"type": "string",
+					"description": "Keeper record title only (no permission suffix)"
+				},
+				{
+					"name": "record_uid",
+					"type": "string",
+					"description": "Keeper record UID only"
+				},
+				{
+					"name": "permission",
+					"type": "string",
+					"description": "Share right level (e.g. view, edit, share) — mapped to Keeper share flags"
+				},
+				{
+					"name": "record_category",
+					"type": "string",
+					"description": "Record source (classic / nsf)"
+				},
+				{
+					"name": "type",
+					"type": "string",
+					"description": "Keeper record type"
+				},
+				{
+					"name":"path",
+					"type":"string",
+					"description":"Keeper record path"
+				}
+			]
+		}
+	]
+}
