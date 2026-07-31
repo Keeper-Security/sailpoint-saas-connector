@@ -8,7 +8,7 @@ import {
 } from '@sailpoint/connector-sdk'
 import { KeeperClient } from '../client/keeper-client'
 import {
-    buildFolderMaps,
+    buildTeamFolderMap,
     buildNodePathMap,
     toFolderEntitlements,
     toNodeEntitlement,
@@ -16,8 +16,8 @@ import {
     toTeamEntitlement,
     toRecordEntitlement,
 } from '../utils/keeper-mappings'
-
-const SUPPORTED_TYPES = ['node', 'team', 'role', 'folder', 'record'] as const
+import { getAllShareableFolders, getRecordList } from '../utils/helper'
+import { SUPPORTED_TYPES } from '../utils/helper'
 
 export function createEntitlementListHandler(client: KeeperClient) {
     return async (
@@ -32,31 +32,31 @@ export function createEntitlementListHandler(client: KeeperClient) {
         await client.syncEnterprise()
         logger.info('Synced enterprise while listing entitlements')
 
+        const vaultTree = await client.listVaultTree()
+
         switch (type) {
             case 'node': {
                 const nodes = await client.listNodes()
                 logger.info(`Fetched ${nodes.length} Keeper nodes`)
+
                 for (const node of nodes) {
                     res.send(toNodeEntitlement(node))
                 }
                 return
             }
-
             case 'team': {
                 const teams = await client.listTeams()
                 const nodes = await client.listNodes()
-                const folders = await client.listAllFolders()
+                // All shareable folders so team.folders match entitlement list
+                const folders = getAllShareableFolders(vaultTree)
                 const nodePathToId = buildNodePathMap(nodes)
-                const { teamUidToFolderIds } = buildFolderMaps(folders, teams)
+                const teamUidToFolderIds = buildTeamFolderMap(folders)
                 logger.info(`Fetched ${teams.length} Keeper teams`)
                 for (const team of teams) {
-                    res.send(
-                        toTeamEntitlement(team, nodePathToId, teamUidToFolderIds.get(team.team_uid) ?? [])
-                    )
+                    res.send(toTeamEntitlement(team, nodePathToId, teamUidToFolderIds.get(team.team_uid) ?? []))
                 }
                 return
             }
-
             case 'role': {
                 const roles = await client.listRoles()
                 const nodes = await client.listNodes()
@@ -68,26 +68,16 @@ export function createEntitlementListHandler(client: KeeperClient) {
                 return
             }
             case 'record': {
-                const records = await client.listRecords()
-                const classic_permissions = ['View Only', 'Can Edit','Can Share','Can Edit & Share','Owner']
-                const nsf_permissions = ['Viewer', 'Share Manager','Content Manager','Content and Share Manager', 'Full Manager','Owner']
-                logger.info(`Fetched ${records.length} Keeper records`)
+                const records = getRecordList(vaultTree)
+
                 for (const record of records) {
-                    if(record.record_category.toLowerCase() === 'classic'){
-                        for(const perm of classic_permissions){
-                            res.send(toRecordEntitlement(record,perm));
-                        }
+                    res.send(toRecordEntitlement(record))
                 }
-                else{
-                    for(const perm of nsf_permissions){
-                        res.send(toRecordEntitlement(record,perm));
-                    }
-                }
-            }
                 return
             }
             case 'folder': {
-                const folders = await client.listAllFolders()
+                // All classic shared_folder / NSF nested_share_folder from vault tree
+                const folders = getAllShareableFolders(vaultTree)
                 let entitlementCount = 0
                 for (const folder of folders) {
                     for (const ent of toFolderEntitlements(folder)) {
@@ -96,11 +86,11 @@ export function createEntitlementListHandler(client: KeeperClient) {
                     }
                 }
                 logger.info(
-                    `Fetched ${folders.length} Keeper folders → ${entitlementCount} folder entitlements (by permission)`
+                    `Fetched ${folders.length} Keeper folders → ` +
+                        `${entitlementCount} folder entitlements (by permission)`
                 )
                 return
             }
-
             default:
                 throw new ConnectorError(
                     `Unsupported entitlement type "${type}"; expected one of: ${SUPPORTED_TYPES.join(', ')}`

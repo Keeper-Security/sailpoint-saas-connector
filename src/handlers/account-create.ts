@@ -1,6 +1,5 @@
 import {
     ConnectorError,
-    ConnectorErrorType,
     Context,
     logger,
     Response,
@@ -8,7 +7,8 @@ import {
     StdAccountCreateOutput,
 } from '@sailpoint/connector-sdk'
 import { CreateUserOptions, KeeperClient } from '../client/keeper-client'
-import { buildAccountMaps, toAccount } from '../utils/keeper-mappings'
+import { loadAccountView } from '../utils/account-view'
+import { coerceNonEmptyStrings, firstEntitlementValue, requireSingleNodeId } from '../utils/helper'
 
 export function createAccountCreateHandler(client: KeeperClient) {
     return async (
@@ -21,7 +21,7 @@ export function createAccountCreateHandler(client: KeeperClient) {
         // Email is the account identifier in our schema. ISC sends it either in
         // `attributes.email` or as `input.identity` (both are usually the same
         // value at create time). We accept either.
-        const email = firstEntitlementValue(attrs.email) ?? normalizeString(input?.identity)
+        const email = firstEntitlementValue(attrs.email) ?? firstEntitlementValue(input?.identity)
         if (!email) {
             throw new ConnectorError('std:account:create requires an email in attributes.email or input.identity')
         }
@@ -38,75 +38,48 @@ export function createAccountCreateHandler(client: KeeperClient) {
         }
 
         // `node` is a managed entitlement, so ISC delivers it as an array
-        // (e.g. ["70411693850651"]) even though it is single-valued. Accept both
-        // the array shape (ISC access requests) and a scalar (Postman/API callers).
-        const nodeId = firstEntitlementValue(attrs.node)
-        if (!nodeId) {
-            throw new ConnectorError(
-                `std:account:create for "${email}" is missing required attribute "node" ` +
-                    `(the node_id of the Keeper enterprise node to place the user in).`
-            )
-        }
+        // (e.g. ["70411693850651"]) even though it is single-valued. Accept a
+        // scalar or a one-element array; reject multiple node ids explicitly.
+        const nodeId = requireSingleNodeId(
+            attrs.node,
+            `std:account:create for "${email}" is missing required attribute "node" ` +
+                `(the node_id of the Keeper enterprise node to place the user in).`
+        )
 
         // Only forward attributes we actually know how to set on Keeper. Every
-        // other attribute (userId, status, twoFactorEnabled, aliases, nodePath)
+        // other attribute (userId, status, twoFactorEnabled, aliases)
         // is either server-controlled or a display-only mirror of the node
-        // entitlement.
+        // entitlement. roles / teams are optional — ISC may include them when
+        // create is driven by a Role/AP that also grants those entitlements.
+        const addRoleValues = coerceNonEmptyStrings(attrs.roles)
+        const addTeamValues = coerceNonEmptyStrings(attrs.teams)
+
         const createOptions: CreateUserOptions = {
             email,
             name,
             jobTitle: firstEntitlementValue(attrs.jobTitle),
             nodeId,
+            ...(addRoleValues.length > 0 ? { addRoleValues } : {}),
+            ...(addTeamValues.length > 0 ? { addTeamValues } : {}),
         }
 
         logger.info(
             `Creating Keeper vault account for "${email}" ` +
-                `(name=${createOptions.name ?? '-'}), in node "${createOptions.nodeId ?? '-'}"`
+                `(name=${createOptions.name}), in node "${createOptions.nodeId}"` +
+                `, roles=[${addRoleValues.join(',') || '-'}]` +
+                `, teams=[${addTeamValues.join(',') || '-'}]`
         )
         await client.createUser(createOptions)
 
         // Fetch the fresh user + folders so ISC's stored account view
         // matches Keeper's post-invite state (status will be "Invited"
-        // until the user accepts the email and sets up their vault). 
-        const user = await client.getUser(email)
-        const folders = await client.listAllFolders()
-
-        if (!user) {
-            throw new ConnectorError(
-                `Keeper user "${email}" was created but could not be read back from enterprise-info. ` +
+        // until the user accepts the email and sets up their vault).
+        res.send(
+            await loadAccountView(client, email, {
+                notFoundMessage:
+                    `Keeper user "${email}" was created but could not be read back from enterprise-info. ` +
                     `Commander may still be propagating the invite; ISC will pick it up on the next aggregation.`,
-                ConnectorErrorType.NotFound
-            )
-        }
-
-        res.send(toAccount(user, buildAccountMaps(folders)))
+            })
+        )
     }
-}
-
-/** Returns a trimmed non-empty string, or undefined for anything else. */
-function normalizeString(value: unknown): string | undefined {
-    if (typeof value !== 'string') return undefined
-    const trimmed = value.trim()
-    return trimmed === '' ? undefined : trimmed
-}
-
-/**
- * ISC delivers multi-valued entitlement attributes as arrays, but occasionally
- * a single scalar sneaks through (e.g., only one value assigned). Normalise
- * both shapes into a filtered array of non-empty trimmed strings.
- */
-function normalizeStringArray(value: unknown): string[] | undefined {
-    if (value == null) return undefined
-    const raw: unknown[] = Array.isArray(value) ? value : [value]
-    const result = raw.map((v) => (typeof v === 'string' ? v.trim() : '')).filter((v) => v !== '')
-    return result.length === 0 ? undefined : result
-}
-
-/**
- * Read a single-valued attribute that ISC may deliver either as a scalar string
- * (Postman/API callers) or as an array (managed entitlements like `node`, even
- * when single-valued). Returns the first non-empty trimmed value, or undefined.
- */
-function firstEntitlementValue(value: unknown): string | undefined {
-    return normalizeString(value) ?? normalizeStringArray(value)?.[0]
 }

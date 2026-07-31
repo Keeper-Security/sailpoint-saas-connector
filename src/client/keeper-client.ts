@@ -1,10 +1,19 @@
-import { ConnectorError } from '@sailpoint/connector-sdk'
+import { ConnectorError, logger } from '@sailpoint/connector-sdk'
 import axios from 'axios'
 import { RequestResultResponse, SubmitRequestResponse } from '../model/service-mode-api'
 import { SourceConfig } from '../model/config'
-import { KeeperNode, KeeperRole, KeeperTeam, KeeperUser, KeeperRecord, KeeperFolder } from '../model/keeper-entities'
+import {
+    KeeperNode,
+    KeeperRole,
+    KeeperTeam,
+    KeeperUser,
+    KeeperRecord,
+    KeeperFolder,
+    KeeperVaultTreeData,
+} from '../model/keeper-entities'
 import { handleAPIErrorResponse } from '../utils/api-error'
 import { requireConfigValue } from '../utils/errors'
+import { getAllShareableFolders } from '../utils/helper'
 
 const USER_COLUMNS = 'name,status,transfer_status,node,team_count,teams,role_count,roles,alias,2fa_enabled,job_title'
 const TEAM_COLUMNS = 'restricts,node,user_count,users,queued_user_count,queued_users,role_count,roles'
@@ -18,20 +27,22 @@ const MAX_POLL_DELAY_MS = 5_000
 /**
  * Inputs for `KeeperClient.createUser`. Only `email` is required — every other
  * field is optional and will be omitted from the underlying Commander call if
- * left blank. `roleIds` and `teamUids` accept the stable IDs we hand out in
- * entitlement:list responses (role_id / team_uid).
+ * left blank. `addRoleValues` / `addTeamValues` accept the stable IDs we hand
+ * out in entitlement:list responses (role_id / team_uid).
  */
 export interface CreateUserOptions {
     email: string
     name?: string
     jobTitle?: string
     nodeId?: string
+    addRoleValues?: string[]
+    addTeamValues?: string[]
 }
 
 /**
  * Snapshot of the Keeper Commander session backing this connector. Populated
  * during `testConnection` and cached on the client so subsequent handlers can
- * read it without a round-trip. Sourced from Commander's `whoami --json`.
+ * read it without a round-trip. Sourced from Commander's `whoami`.
  */
 export interface WhoamiInfo {
     /** Email of the Commander service account driving this connector. */
@@ -48,6 +59,9 @@ export interface WhoamiInfo {
  * `addRoleValues` / `removeRoleValues` / `addTeamValues` / `removeTeamValues`
  * are the pre-computed membership deltas. Each entry may be either a stable
  * ID (role_id / team_uid) or a display name — Commander accepts both.
+ *
+ * `addRecordValues` / `removeRecordValues` are used by `updateRecordPermissions`
+ * only — `updateUser` ignores them.
  */
 export interface UpdateUserOptions {
     email: string
@@ -58,6 +72,8 @@ export interface UpdateUserOptions {
     removeRoleValues?: string[]
     addTeamValues?: string[]
     removeTeamValues?: string[]
+    addRecordValues?: string[]
+    removeRecordValues?: string[]
 }
 
 function sleep(ms: number): Promise<void> {
@@ -107,19 +123,11 @@ export class KeeperClient {
     }
 
     /**
-     * Run a Commander command via the async execute + poll pipeline.
-     *
      * Submit a Commander command via Service Mode and wait for its result.
      * Callers are responsible for calling `syncVault()` / `syncEnterprise()`
      * beforehand when they need fresh local Commander state — this method
      * never syncs implicitly.
      */
-    private async executeCommand(
-        command: string,
-    ): Promise<RequestResultResponse> {
-        return this.runCommand(command)
-    }
-
     private async runCommand(command: string): Promise<RequestResultResponse> {
         const requestId = await this.submitRequest(command)
         return this.pollRequestResult(requestId)
@@ -211,11 +219,11 @@ export class KeeperClient {
     }
 
     /**
-     * Actually hit Commander's `whoami --json`. No syncVault / syncEnterprise
+     * Actually hit Commander's `whoami`. No syncVault / syncEnterprise
      * needed because whoami is a session lookup, not vault or enterprise data.
      */
     private async fetchWhoami(): Promise<WhoamiInfo> {
-        const result = await this.executeCommand('whoami')
+        const result = await this.runCommand('whoami')
         const data = result.data as WhoamiInfo
 
         return {
@@ -224,7 +232,7 @@ export class KeeperClient {
     }
 
     async listUsers(): Promise<KeeperUser[]> {
-        const result = await this.executeCommand(`enterprise-info --users --format json -v --columns ${USER_COLUMNS}`)
+        const result = await this.runCommand(`enterprise-info --users --format json -v --columns ${USER_COLUMNS}`)
         return this.parseArrayData<KeeperUser>(result.data, 'users')
     }
 
@@ -236,7 +244,7 @@ export class KeeperClient {
         const { trimmed, safe } = this.normalizeEmailArg(email, 'getUser')
 
         // enterprise-info accepts a positional pattern; use the escaped form.
-        const result = await this.executeCommand(
+        const result = await this.runCommand(
             `enterprise-info "${safe}" --users --format json -v --columns ${USER_COLUMNS}`
         )
         const users = this.parseArrayData<KeeperUser>(result.data, 'users')
@@ -252,7 +260,7 @@ export class KeeperClient {
      */
     async lockUser(email: string): Promise<void> {
         const { safe } = this.normalizeEmailArg(email, 'lockUser')
-        await this.executeCommand(`enterprise-user "${safe}" --lock`)
+        await this.runCommand(`enterprise-user "${safe}" --lock`)
     }
 
     /**
@@ -261,7 +269,23 @@ export class KeeperClient {
      */
     async unlockUser(email: string): Promise<void> {
         const { safe } = this.normalizeEmailArg(email, 'unlockUser')
-        await this.executeCommand(`enterprise-user "${safe}" --unlock`)
+        await this.runCommand(`enterprise-user "${safe}" --unlock`)
+    }
+
+    /**
+     * Permanently delete a Keeper enterprise user. Destructive — removes the
+     * user from the enterprise and (unless vault data was transferred first)
+     * destroys their vault records along with the account. Commander is called
+     * with `--force` to suppress the interactive "are you sure?" prompt that
+     * would otherwise stall in Service Mode.
+     *
+     * Callers wanting idempotent semantics should check with `getUser()` first
+     * and short-circuit on `null` — this method assumes the user exists and
+     * will surface a Commander error if they don't.
+     */
+    async deleteUser(email: string): Promise<void> {
+        const { safe } = this.normalizeEmailArg(email, 'deleteUser')
+        await this.runCommand(`enterprise-user "${safe}" --delete --force`)
     }
 
     /**
@@ -288,7 +312,10 @@ export class KeeperClient {
         if (options.jobTitle) parts.push(`--job-title "${this.escapeArg(options.jobTitle)}"`)
         if (options.nodeId) parts.push(`--node "${this.escapeArg(options.nodeId)}"`)
 
-        await this.executeCommand(parts.join(' '))
+        for (const v of options.addRoleValues ?? []) parts.push(`--add-role "${this.escapeArg(v)}"`)
+        for (const v of options.addTeamValues ?? []) parts.push(`--add-team "${this.escapeArg(v)}"`)
+
+        await this.runCommand(parts.join(' '))
     }
 
     /**
@@ -318,10 +345,50 @@ export class KeeperClient {
         for (const v of options.addTeamValues ?? []) parts.push(`--add-team "${this.escapeArg(v)}"`)
 
         if (parts.length === 1) {
-            throw new ConnectorError('updateUser called with no attributes to change')
+            logger.info(
+                `updateUser called with no attributes to change for ${options.email} skipping teams and roles updates.`
+            )
+            return
         }
 
-        await this.executeCommand(parts.join(' '))
+        await this.runCommand(parts.join(' '))
+    }
+
+    async updateRecordPermissions(options: UpdateUserOptions): Promise<void> {
+        for (const v of options.addRecordValues ?? []) {
+            await this.runCommand(this.createRecordCommand(v, options.email) + ' --action grant')
+        }
+
+        for (const v of options.removeRecordValues ?? []) {
+            await this.runCommand(this.createRecordCommand(v, options.email) + ' --action revoke')
+        }
+    }
+
+    private createRecordCommand(recordId: string, email: string): string {
+        const assignPerm = recordId.split(':')[1]
+
+        switch (assignPerm) {
+            case 'RO':
+                return `share-record -e ${email} "${recordId.split(':')[0]}"`
+            case 'CE':
+                return `share-record -e ${email} "${recordId.split(':')[0]}" --write`
+            case 'CS':
+                return `share-record -e ${email} "${recordId.split(':')[0]}" --share`
+            case 'VW':
+                return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r viewer`
+            case 'SM':
+                return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r share-manager`
+            case 'FM':
+                return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r full-manager`
+            case 'CSM':
+                return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r content-share-manager`
+            case 'CM':
+                return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r content-manager`
+            case 'OW':
+                throw new ConnectorError(`Ownership change is restricted. Please perform this action on Keeper Vault.`)
+            default:
+                throw new ConnectorError(`Invalid permission: ${assignPerm}`)
+        }
     }
 
     /**
@@ -343,86 +410,6 @@ export class KeeperClient {
     }
 
     /**
-     * Map one row from `ls -f -R --format json` into KeeperFolder.
-     * Returns null for non-folder rows or unknown source values.
-     *
-     * Example row:
-     * {
-     *   "type": "folder",
-     *   "uid": "Oz2TFhU8DazlqKyf88zLiA",
-     *   "name": "DemoSailPoint",
-     *   "details": "Flags: , Parent: wvTib3HCfq0ErqalHQY_dw",
-     *   "source": "classic_folder"
-     * }
-     */
-    private mapLsFolder(row: Record<string, unknown>): KeeperFolder | null {
-        if (row.type !== 'folder') {
-            return null
-        }
-
-        const uid = String(row.uid ?? '').trim()
-        if (!uid) {
-            return null
-        }
-
-        const name = String(row.name ?? '')
-        const source = String(row.source ?? '')
-
-        let folderType: KeeperFolder['folderType'] | null = null
-        if (source === 'classic_folder') {
-            folderType = 'classic'
-        } else if (source === 'nested_share_folder') {
-            folderType = 'nsf'
-        } else {
-            return null
-        }
-
-        const details = String(row.details ?? '')
-        // details looks like: "Flags: S, Parent: /" or "Flags: , Parent: <uid>"
-        const parentMatch = details.match(/Parent:\s*(.+)$/i)
-        const parentRaw = parentMatch?.[1]?.trim() ?? ''
-        const parentId = !parentRaw || parentRaw === '/' ? undefined : parentRaw
-
-        return {
-            uid,
-            name,
-            path: name,
-            folderType,
-            parentId,
-        }
-    }
-
-    /**
-     * Build a display path from folder names by walking parentId links.
-     * Example: Freshservice Demo/DemoSailPoint
-     */
-    private buildFolderNamePath(
-        folder: KeeperFolder,
-        byUid: Map<string, KeeperFolder>
-    ): string {
-        const parts: string[] = []
-        let current: KeeperFolder | undefined = folder
-        const guard = new Set<string>()
-
-        while (current) {
-            if (guard.has(current.uid)) {
-                break
-            }
-            guard.add(current.uid)
-            parts.unshift(current.name || current.uid)
-
-            const parentId = current.parentId
-            if (!parentId) {
-                break
-            }
-
-            current = byUid.get(parentId)
-        }
-
-        return parts.join('/')
-    }
-
-    /**
      * Escape double quotes inside an argument value so Commander's argparse
      * parser doesn't split the string. Values are wrapped in `"..."` at the
      * call site; this ensures embedded quotes don't terminate that wrap.
@@ -431,59 +418,76 @@ export class KeeperClient {
         return value.replace(/"/g, '\\"')
     }
 
-    async syncEnterprise(): Promise<void>{
+    async syncEnterprise(): Promise<void> {
         await this.runCommand('enterprise-down -f')
     }
 
-    async syncVault(): Promise<void>{
+    async syncVault(): Promise<void> {
         await this.runCommand('sync-down -f')
     }
 
+    async listVaultTree(): Promise<KeeperVaultTreeData> {
+        const result = await this.runCommand('tree -s -ns -r -v --format json')
+        return this.parseObjectData<KeeperVaultTreeData>(result.data, 'vaultTree')
+    }
+
     async listTeams(): Promise<KeeperTeam[]> {
-        const result = await this.executeCommand(`enterprise-info --teams --format json -v --columns ${TEAM_COLUMNS}`)
+        const result = await this.runCommand(`enterprise-info --teams --format json -v --columns ${TEAM_COLUMNS}`)
         return this.parseArrayData<KeeperTeam>(result.data, 'teams')
     }
 
     async listRoles(): Promise<KeeperRole[]> {
-        const result = await this.executeCommand(`enterprise-info --roles --format json -v --columns ${ROLE_COLUMNS}`)
+        const result = await this.runCommand(`enterprise-info --roles --format json -v --columns ${ROLE_COLUMNS}`)
         return this.parseArrayData<KeeperRole>(result.data, 'roles')
     }
 
     async listNodes(): Promise<KeeperNode[]> {
-        const result = await this.executeCommand(`enterprise-info --nodes --format json -v --columns ${NODE_COLUMNS}`)
+        const result = await this.runCommand(`enterprise-info --nodes --format json -v --columns ${NODE_COLUMNS}`)
         return this.parseArrayData<KeeperNode>(result.data, 'nodes')
     }
-    
+
     /**
-     * List all vault folders (classic + NSF, including nested) via one recursive ls.
-     * Replaces list-sf + nsf-list for entitlement aggregation.
+     * All classic/NSF shareable folders from the vault tree.
+     * Used for entitlement aggregation and account/team folder attributes.
      */
     async listAllFolders(): Promise<KeeperFolder[]> {
-        const result = await this.executeCommand('ls -f -R --format json')
-        const rows = this.parseArrayData<Record<string, unknown>>(result.data, 'folders')
-
-        const folders: KeeperFolder[] = []
-        const seen = new Set<string>()
-
-        for (const row of rows) {
-            const folder = this.mapLsFolder(row)
-            if (!folder) continue
-            if (seen.has(folder.uid)) continue
-            seen.add(folder.uid)
-            folders.push(folder)
-        }
-
-        const byUid = new Map(folders.map((f) => [f.uid, f]))
-
-        return folders.map((f) => ({
-            ...f,
-            path: this.buildFolderNamePath(f, byUid),
-        }))
+        const vaultTree = await this.listVaultTree()
+        return getAllShareableFolders(vaultTree)
     }
 
-    async listRecords(): Promise<KeeperRecord[]> {
-        const result = await this.executeCommand(`list --format json`)
-        return this.parseArrayData<KeeperRecord>(result.data, 'records')
+    /** Grant classic shared-folder access (`share-folder -a grant`). */
+    async grantClassicFolderShare(
+        folderUid: string,
+        email: string,
+        manageUsers: 'on' | 'off',
+        manageRecords: 'on' | 'off'
+    ): Promise<void> {
+        const { safe: safeEmail } = this.normalizeEmailArg(email, 'grantClassicFolderShare')
+        const safeUid = this.escapeArg(folderUid.trim())
+        await this.runCommand(
+            `share-folder -a grant -e "${safeEmail}" -o ${manageUsers} -p ${manageRecords} "${safeUid}"`
+        )
+    }
+
+    /** Revoke classic shared-folder access (`share-folder -a remove -f`). */
+    async removeClassicFolderShare(folderUid: string, email: string): Promise<void> {
+        const { safe: safeEmail } = this.normalizeEmailArg(email, 'removeClassicFolderShare')
+        const safeUid = this.escapeArg(folderUid.trim())
+        await this.runCommand(`share-folder -a remove -e "${safeEmail}" -f "${safeUid}"`)
+    }
+
+    /** Grant NSF folder access (`nsf-share-folder -a grant -r <role>`). */
+    async grantNsfFolderShare(folderUid: string, email: string, role: string): Promise<void> {
+        const { safe: safeEmail } = this.normalizeEmailArg(email, 'grantNsfFolderShare')
+        const safeUid = this.escapeArg(folderUid.trim())
+        await this.runCommand(`nsf-share-folder -a grant -e "${safeEmail}" -r ${role} "${safeUid}"`)
+    }
+
+    /** Revoke NSF folder access (`nsf-share-folder -a remove`). */
+    async removeNsfFolderShare(folderUid: string, email: string): Promise<void> {
+        const { safe: safeEmail } = this.normalizeEmailArg(email, 'removeNsfFolderShare')
+        const safeUid = this.escapeArg(folderUid.trim())
+        await this.runCommand(`nsf-share-folder -a remove -e "${safeEmail}" "${safeUid}"`)
     }
 
     /**
@@ -516,6 +520,40 @@ export class KeeperClient {
 
         if (data == null) {
             return []
+        }
+
+        throw new ConnectorError(`Unexpected Keeper ${kind} response type: ${typeof data}`)
+    }
+
+    /**
+     * Same as parseArrayData, but for a single JSON object (e.g. vault tree).
+     */
+    private parseObjectData<T extends object>(data: unknown, kind: string): T {
+        if (data != null && typeof data === 'object' && !Array.isArray(data)) {
+            return data as T
+        }
+
+        if (typeof data === 'string') {
+            const trimmed = data.trim()
+            if (trimmed === '') {
+                throw new ConnectorError(`Keeper ${kind} response was empty`)
+            }
+            try {
+                const parsed = JSON.parse(trimmed)
+                if (parsed != null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                    return parsed as T
+                }
+                throw new ConnectorError(
+                    `Keeper ${kind} response parsed but is not an object (got ${
+                        Array.isArray(parsed) ? 'array' : typeof parsed
+                    })`
+                )
+            } catch (err) {
+                if (err instanceof ConnectorError) {
+                    throw err
+                }
+                throw new ConnectorError(`Failed to parse Keeper ${kind} response as JSON: ${(err as Error).message}`)
+            }
         }
 
         throw new ConnectorError(`Unexpected Keeper ${kind} response type: ${typeof data}`)

@@ -2,7 +2,6 @@ import {
     ConnectorError,
     ConnectorErrorType,
     Context,
-    KeyID,
     logger,
     Response,
     StdEntitlementReadInput,
@@ -10,20 +9,19 @@ import {
 } from '@sailpoint/connector-sdk'
 import { KeeperClient } from '../client/keeper-client'
 import {
-    buildFolderMaps,
+    buildTeamFolderMap,
     buildNodePathMap,
     toFolderEntitlement,
+    toNonSharableFolderEntitlement,
     toNodeEntitlement,
     toRoleEntitlement,
     toTeamEntitlement,
+    toRecordEntitlement,
 } from '../utils/keeper-mappings'
-import {
-    FolderPermission,
-    isValidPermission,
-    parseFolderEntitlementId,
-} from '../utils/folder-permissions'
-
-const SUPPORTED_TYPES = ['node', 'team', 'role', 'folder'] as const
+import { FolderPermission, isValidPermission, parseFolderEntitlementId } from '../utils/folder-permissions'
+import { getAllShareableFolders, getRecordList } from '../utils/helper'
+import { safeKeyId } from '../utils/identity'
+import { SUPPORTED_TYPES } from '../utils/helper'
 
 export function createEntitlementReadHandler(client: KeeperClient) {
     return async (
@@ -38,12 +36,17 @@ export function createEntitlementReadHandler(client: KeeperClient) {
         // harnesses (spcx / Postman) work reliably.
         const identity = safeKeyId(input) ?? input?.identity
         if (!identity) {
-            throw new ConnectorError(
-                `std:entitlement:read called without an identity (type: ${type ?? 'unknown'})`
-            )
+            throw new ConnectorError(`std:entitlement:read called without an identity (type: ${type ?? 'unknown'})`)
         }
 
         logger.info(`Reading Keeper ${type} entitlement ${identity}`)
+
+        await client.syncVault()
+        logger.info('Synced vault while listing entitlements')
+        await client.syncEnterprise()
+        logger.info('Synced enterprise while listing entitlements')
+
+
 
         switch (type) {
             case 'node': {
@@ -52,10 +55,7 @@ export function createEntitlementReadHandler(client: KeeperClient) {
                 const nodes = await client.listNodes()
                 const node = nodes.find((n) => String(n.node_id) === identity)
                 if (!node) {
-                    throw new ConnectorError(
-                        `Keeper node with id "${identity}" not found`,
-                        ConnectorErrorType.NotFound
-                    )
+                    throw new ConnectorError(`Keeper node with id "${identity}" not found`, ConnectorErrorType.NotFound)
                 }
                 res.send(toNodeEntitlement(node))
                 return
@@ -72,14 +72,8 @@ export function createEntitlementReadHandler(client: KeeperClient) {
                         ConnectorErrorType.NotFound
                     )
                 }
-                const { teamUidToFolderIds } = buildFolderMaps(folders, teams)
-                res.send(
-                    toTeamEntitlement(
-                        team,
-                        buildNodePathMap(nodes),
-                        teamUidToFolderIds.get(team.team_uid) ?? []
-                    )
-                )
+                const teamUidToFolderIds = buildTeamFolderMap(folders)
+                res.send(toTeamEntitlement(team, buildNodePathMap(nodes), teamUidToFolderIds.get(team.team_uid) ?? []))
                 return
             }
 
@@ -88,10 +82,7 @@ export function createEntitlementReadHandler(client: KeeperClient) {
                 const nodes = await client.listNodes()
                 const role = roles.find((r) => String(r.role_id) === identity)
                 if (!role) {
-                    throw new ConnectorError(
-                        `Keeper role with id "${identity}" not found`,
-                        ConnectorErrorType.NotFound
-                    )
+                    throw new ConnectorError(`Keeper role with id "${identity}" not found`, ConnectorErrorType.NotFound)
                 }
                 res.send(toRoleEntitlement(role, buildNodePathMap(nodes)))
                 return
@@ -99,22 +90,59 @@ export function createEntitlementReadHandler(client: KeeperClient) {
 
             case 'folder': {
                 const { uid, permission } = parseFolderEntitlementId(identity)
-                const folders = await client.listAllFolders()
+                const vaultTree = await client.listVaultTree()
+                const folders = getAllShareableFolders(vaultTree)
                 const folder = folders.find((f) => f.uid === uid)
                 if (!folder) {
-                    throw new ConnectorError(
-                        `Keeper folder with uid "${uid}" not found`,
-                        ConnectorErrorType.NotFound
-                    )
+                    throw new ConnectorError(`Keeper folder with uid "${uid}" not found`, ConnectorErrorType.NotFound)
                 }
-                if (!isValidPermission(folder.folderType, permission)) {
+                if (folder.folderType === 'non-sharable') {
+                    if (permission != null) {
+                        throw new ConnectorError(
+                            `Non-sharable folder id must be raw uid, got "${identity}"`,
+                            ConnectorErrorType.NotFound
+                        )
+                    }
+                    res.send(toNonSharableFolderEntitlement(folder))
+                    return
+                }
+                if (!permission || !isValidPermission(folder.folderType, permission)) {
                     throw new ConnectorError(
-                        `Invalid permission "${permission}" for folderType "${folder.folderType}" ` +
-                            `(id "${identity}")`,
+                        `Invalid permission "${permission ?? ''}" for folderType "${folder.folderType}" ` +
+                        `(id "${identity}")`,
                         ConnectorErrorType.NotFound
                     )
                 }
                 res.send(toFolderEntitlement(folder, permission as FolderPermission))
+                return
+            }
+
+            case 'record': {
+                // Same identity shape as folders: "<recordUid>:<permission>".
+                const { uid, permission } = parseFolderEntitlementId(identity)
+                const vaultTree = await client.listVaultTree()
+                const records = getRecordList(vaultTree)
+                const forUid = records.filter((r) => r.record_uid === uid)
+                if (forUid.length === 0) {
+                    throw new ConnectorError(
+                        `Keeper record with uid "${uid}" not found`,
+                        ConnectorErrorType.NotFound
+                    )
+                }
+                if (!permission) {
+                    throw new ConnectorError(
+                        `Record entitlement id must be "uid:permission", got "${identity}"`,
+                        ConnectorErrorType.NotFound
+                    )
+                }
+                const record = forUid.find((r) => r.record_uid_perm === `${uid}:${permission}`)
+                if (!record) {
+                    throw new ConnectorError(
+                        `Invalid permission "${permission}" for record "${uid}" (id "${identity}")`,
+                        ConnectorErrorType.NotFound
+                    )
+                }
+                res.send(toRecordEntitlement(record))
                 return
             }
 
@@ -123,15 +151,5 @@ export function createEntitlementReadHandler(client: KeeperClient) {
                     `Unsupported entitlement type "${type}"; expected one of: ${SUPPORTED_TYPES.join(', ')}`
                 )
         }
-    }
-}
-
-/** Returns the key's simple id if present, else null. KeyID throws on missing keys. */
-function safeKeyId(input: StdEntitlementReadInput): string | null {
-    if (!input?.key) return null
-    try {
-        return KeyID({ key: input.key })
-    } catch {
-        return null
     }
 }

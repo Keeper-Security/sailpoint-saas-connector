@@ -5,6 +5,7 @@
 		"std:account:read",
 		"std:account:create",
 		"std:account:update",
+		"std:account:delete",
 		"std:account:disable",
 		"std:account:enable",
 		"std:entitlement:list",
@@ -74,11 +75,6 @@
 				"description": "Keeper enterprise user status (Invited, Active, Locked, etc.)"
 			},
 			{
-				"name": "accountStatus",
-				"type": "string",
-				"description": "Keeper enterprise user status (Invited, Active, Locked)"
-			},
-			{
 				"name": "jobTitle",
 				"type": "string",
 				"description": "Job title"
@@ -93,11 +89,6 @@
 				"type": "string",
 				"description": "Alternate email aliases",
 				"multi": true
-			},
-			{
-				"name": "nodePath",
-				"type": "string",
-				"description": "Full node path (display only). Node identity lives in the node entitlement."
 			},
 			{
 				"name": "node",
@@ -130,11 +121,20 @@
 			{
 				"name": "folders",
 				"type": "string",
-				"description": "Classic/NSF folders shared directly to this user.",
+				"description": "Folder entitlements from the vault tree: classic shared folders and NSF folders as <folderUid>:<permission>; non-sharable plain folders as raw <folderUid>. Classic: NP|MU|MR|MUR. NSF: VW|SM|CM|CSM|FM.",
 				"entitlement": true,
 				"managed": true,
 				"multi": true,
 				"schemaObjectType": "folder"
+			},
+			{
+				"name": "records",
+				"type": "string",
+				"description": "Classic/NSF records shared directly to this user.",
+				"entitlement": true,
+				"managed": true,
+				"multi": true,
+				"schemaObjectType": "record"
 			}
 		]
 	},
@@ -209,8 +209,10 @@
 				{
 					"name": "folders",
 					"type": "string",
-					"description": "Folder ids shared to this team.",
-					"multi": true
+					"description": "Folder entitlements from the vault tree: classic/NSF as <folderUid>:<permission>; non-sharable plain folders as raw <folderUid>. Classic: NP|MU|MR|MUR. NSF: VW|SM|CM|CSM|FM.",
+					"multi": true,
+					"entitlement": true,
+					"schemaObjectType": "folder"
 				}
 			]
 		},
@@ -264,27 +266,42 @@
 				{
 					"name": "id",
 					"type": "string",
-					"description": "Keeper folder UID (classic shared folder UID or NSF UID)"
+					"description": "Folder entitlement id: <folderUid>:<permission> for classic/NSF, or raw folderUid for non-sharable. Classic NP|MU|MR|MUR. NSF VW|SM|CM|CSM|FM"
+				},
+				{
+					"name": "uid",
+					"type": "string",
+					"description": "Raw Keeper folder UID (without permission suffix)"
 				},
 				{
 					"name": "name",
 					"type": "string",
-					"description": "Folder name"
+					"description": "Folder name; sharable folders include permission label, e.g. New Demo [Manage records]"
 				},
 				{
 					"name": "path",
 					"type": "string",
-					"description": "Display path"
+					"description": "Folder path (same for all permissions of one folder)"
 				},
 				{
 					"name": "folderType",
 					"type": "string",
-					"description": "classic or nsf"
+					"description": "classic, nsf, or non-sharable"
 				},
 				{
 					"name": "parentId",
 					"type": "string",
 					"description": "Parent folder UID (absent for vault root children)"
+				},
+				{
+					"name": "permission",
+					"type": "string",
+					"description": "Permission code for classic/NSF; absent for non-sharable. Classic: NP, MU, MR, MUR. NSF: VW, SM, CM, CSM, FM"
+				},
+				{
+					"name": "permissionLabel",
+					"type": "string",
+					"description": "Human-readable permission label"
 				}
 			]
 		},
@@ -327,6 +344,11 @@
 					"name": "type",
 					"type": "string",
 					"description": "Keeper record type"
+				},
+				{
+					"name":"path",
+					"type":"string",
+					"description":"Keeper record path"
 				}
 			]
 		}

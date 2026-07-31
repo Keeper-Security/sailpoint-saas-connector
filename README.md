@@ -1,188 +1,294 @@
-# Keeper SaaS Connector
+# Keeper Security Connector for SailPoint Identity Security Cloud
 
-SailPoint SaaS connector for **Keeper Security** enterprise user governance. The connector talks to Keeper through **Keeper Commander Service Mode**.
+Govern Keeper Security enterprise users and access from SailPoint Identity Security Cloud (ISC). This SaaS connector integrates with **Keeper Commander Service Mode API v2** so you can aggregate accounts and entitlements, correlate identities, and provision access without custom scripts.
 
-## How it works
+---
 
-1. ISC (or local `spcx`) supplies Service Mode credentials in source config.
-2. `KeeperClient` submits Commander commands via `POST /api/v2/executecommand-async`.
-3. The client polls `GET /api/v2/result/{request_id}` until the command completes (or times out).
+## Overview
 
-Default poll timeout is **60 seconds** (configurable via `pollTimeoutSeconds`).
+The Keeper Security connector enables identity governance for your Keeper enterprise, including:
 
-## Capabilities
+- Account aggregation and single-account refresh
+- Entitlement aggregation for nodes, teams, roles, folders, and records
+- Account lifecycle: create, update (entitlements), enable, disable, and delete
+- Test connection against your Commander Service Mode endpoint
 
-| Area | Commands |
-|------|----------|
-| Connection | `std:test-connection` |
-| Accounts | `std:account:list`, `std:account:read`, `std:account:create`, `std:account:disable`, `std:account:enable`, `std:account:update` |
-| Entitlements | `std:entitlement:list`, `std:entitlement:read` |
+Identity on Keeper accounts is the user’s **email**. ISC Enable/Disable maps to Keeper lock/unlock. The account **status** attribute preserves Keeper’s native value (`Active`, `Invited`, `Locked`, and similar).
 
-> **Current implementation:** `std:test-connection` is wired (runs Commander `this-device`). Remaining commands are declared in `connector-spec.json` for the planned account/entitlement surface.
+---
 
-### Source configuration
+## Supported features
 
-| Key | Type | Required | Description |
-|-----|------|----------|-------------|
-| `serviceModeApiUrl` | text | yes | Commander Service Mode base URL (**without** `/api/v2/`) |
-| `serviceModeApiKey` | secret | yes | Service Mode API key (`api-key` header) |
-| `pollTimeoutSeconds` | text | no | Async result poll timeout in seconds (default: `60`) |
+- Test connection
+- Account aggregation
+- Account read / reload
+- Entitlement aggregation
+- Entitlement read
+- Create account
+- Update account (entitlements)
+- Enable / disable account
+- Delete account
+
+### Entitlement types
+
+| Type | Description |
+|---|---|
+| **node** | Keeper enterprise node (organizational unit). Users belong to exactly one node. |
+| **team** | Keeper team membership |
+| **role** | Keeper role membership |
+| **folder** | Shared folder access (classic and NSF), including permission level |
+| **record** | Record shares granted directly to the user (classic and NSF) |
 
 ---
 
 ## Prerequisites
 
-| Tool | Notes |
-|------|--------|
-| **Node.js 18.12+** | Required by SailPoint Connector SDK |
-| **SailPoint CLI** | `sailpoint-cli` via Homebrew (`sail` command) |
-| **SailPoint tenant** | ISC demo/prod tenant with PAT configured |
-| **Keeper Commander Service Mode** | Running Service Mode endpoint with a valid API key |
-| **npm** | For build and packaging |
+Before configuring a source in ISC, ensure the following:
 
-### SailPoint CLI setup
+1. **Keeper enterprise** with administrative access to manage users, teams, roles, and sharing.
+2. **Keeper Commander Service Mode** running and reachable from SailPoint’s cloud (or your allowed network path), with a valid Service Mode API key.
+3. **SailPoint ISC** admin permissions to create sources, configure correlation, and run aggregations.
 
-```bash
-sail env list
-sail env use keeper-security
-sail conn list
-```
-
-PAT must include connector upload scopes (e.g. `sp:scopes:all` for demo tenants).
+> **Network:** The Service Mode URL must be reachable from the ISC connector runtime. For private or firewall-restricted Commander hosts, expose Service Mode with a supported tunnel such as **ngrok** or **Cloudflare Tunnel**, then use the public tunnel URL as the Service Mode API URL in the source configuration.
 
 ---
 
-## Project structure
+## Commander Service Mode Setup
+
+To keep zero-knowledge and end-to-end encryption, **Commander Service Mode** runs on your infrastructure and is the only path the SailPoint connector uses to talk to Keeper.
+
+Use `sailpoint-app-setup` to create the Docker-based Service Mode deployment and SailPoint-specific settings in one flow.
+
+### Before you start
+
+1. [Install Keeper Commander](https://docs.keeper.io/keeperpam/commander-cli/commander-installation-setup) on a workstation.
+2. Prefer a dedicated Keeper **service account** with rights to manage enterprise users and to share the folders/records you will govern from ISC.
+3. Log in to Commander with that account:
 
 ```
-keeper-security/
-├── src/
-│   ├── index.ts                    # SailPoint connector entry
-│   ├── client/
-│   │   └── keeper-client.ts        # Commander Service Mode HTTP client
-│   ├── handlers/
-│   │   └── test-connection.ts      # std:test-connection
-│   ├── model/
-│   │   ├── config.ts               # SourceConfig
-│   │   └── service-mode-api.ts     # Service Mode request/response types
-│   └── utils/
-│       ├── api-error.ts
-│       └── errors.ts
-├── tests/
-├── connector-spec.json             # Commands + source config UI
-├── package.json
-├── tsconfig.json
-└── dist/                           # Built output (gitignored)
+keeper shell
+login serviceuser@company.com
 ```
 
-**Not in repo / not in zip:** secrets, `config.json` (optional local-only file for CLI validate).
+4. Ensure Docker is available on the host where Service Mode will run.
+
+### Run SailPoint setup
+
+```
+My Vault> sailpoint-app-setup
+```
+
+The command runs in two phases and writes a `docker-compose.yml` with a **Commander-only** service (no separate SailPoint container).
+
+#### Phase 1 — Service Mode / Docker
+
+Creates the shared folder, Docker config record, KSM application, and client config, then prompts for:
+
+| Prompt | Description |
+|---|---|
+| **Port** | Local port for Commander Service Mode. Default: `8900`. |
+| **Enable ngrok?** | Optional public URL via ngrok. Default: No. |
+| **Ngrok Auth Token** | Required if ngrok is enabled. |
+| **Ngrok Custom Domain** | Optional (for example `myapp.ngrok.io`). Press Enter to skip. |
+| **Enable Cloudflare?** | Asked only if ngrok is disabled. Default: No. |
+| **Cloudflare Tunnel Token** | Required if Cloudflare is enabled. |
+| **Cloudflare Custom Domain** | Required if Cloudflare is enabled (for example `commander.company.com`). |
+
+> **Ngrok and Cloudflare are mutually exclusive.** For SailPoint ISC (SaaS), the Service Mode URL must be reachable from SailPoint’s connector runtime. If Commander is on a private network, enable **ngrok** or **Cloudflare Tunnel** and use that public HTTPS URL as **Keeper Commander Service Mode API URL** in the source.
+
+Queue mode (API v2) is enabled automatically. The command allowlist is limited to SailPoint-safe operations (user lifecycle and sharing). Secret-bearing commands such as `get`, `export`, and `find-password` are excluded.
+
+#### Phase 2 — SailPoint options
+
+| Prompt | Description |
+|---|---|
+| **Allow folder shares?** | Whether SailPoint may manage folder share entitlements (`share-folder` / `nsf-share-folder`). Default: Yes. |
+| **Allow record shares?** | Whether SailPoint may manage record share entitlements (`share-record` / `nsf-share-record`). Default: Yes. |
+| **Allow role assignment?** | Whether SailPoint may assign roles via `enterprise-user` / `enterprise-role`. Default: Yes. |
+| **Allow team assignment?** | Whether SailPoint may assign teams via `enterprise-user`. Default: Yes. |
+| **Interval seconds** | How often Commander re-checks invited users and applies queued entitlements after they become **Active**. Default: `60`. Minimum: `15`. |
+
+> Disabled capabilities are rejected by Service Mode (HTTP 403). Nodes are never gated — `--node` remains available for invites and moves.
+
+Resources created (defaults):
+
+| Resource | Default name |
+|---|---|
+| Shared folder | `Commander Service Mode - SailPoint` |
+| KSM application | `Commander Service Mode - KSM App` |
+| Docker config record | `Commander Service Mode Docker Config` |
+| SailPoint config record | `Commander Service Mode SailPoint Config` |
+| Docker service / container | `commander-sailpoint` / `keeper-service-sailpoint` |
+
+> Re-running setup rewrites `docker-compose.yml` (manual edits are lost) but preserves queued pending entitlements on the SailPoint config record.
+
+### Deploy
+
+```
+My Vault> quit
+rm ~/.keeper/config.json
+docker compose up -d
+docker ps
+docker logs keeper-service-sailpoint
+curl http://localhost:<port>/health
+```
+
+Delete the local `config.json` before starting Docker so the container does not conflict with the same device token. Docker loads its own config through KSM.
+
+### Values for the ISC source
+
+After the service is healthy:
+
+1. **Keeper Commander Service Mode API URL** — public base URL **without** `/api/v2/` (tunnel URL if you enabled ngrok/Cloudflare, otherwise your reachable host URL).
+2. **Keeper Commander Service Mode API Key** — from the Docker/service config record created during setup (stored in the vault after the container starts Service Mode).
+
+Use those values in [Source configuration](#source-configuration).
+
+### Deferred entitlements (Invited users)
+
+Keeper cannot fully apply some entitlements until the user is **Active**. Commander queues role, team, folder, and record grants requested while the user is still **Invited**, then applies them after activation (on the poll interval from Phase 2).
+
+This matches ISC create behavior: initial **roles** / **teams** on create are applied once the user becomes active.
+
+### Optional CLI flags
+
+```
+My Vault> sailpoint-app-setup \
+  --folder-name "Commander Service Mode - SailPoint" \
+  --app-name "Commander Service Mode - KSM App" \
+  --config-record-name "Commander Service Mode Docker Config" \
+  --sailpoint-record-name "Commander Service Mode SailPoint Config" \
+  --skip-device-setup
+```
+
+| Flag | Description |
+|---|---|
+| `--folder-name` | Shared folder name |
+| `--app-name` | KSM application name |
+| `--config-record-name` | Docker/service config record name |
+| `--sailpoint-record-name` | SailPoint config record name |
+| `--config-path` | Path to Commander `config.json` |
+| `--timeout` | Device timeout (default: `30d`) |
+| `--skip-device-setup` | Skip device registration if already configured |
 
 ---
 
-## Local development
+## Install from the Marketplace
 
-```bash
-cd keeper-security
-npm install
-npm run build
-npm run dev
-```
-
-Dev server: `http://localhost:3000`.
-
-### Example requests
-
-**Test connection**
-
-```json
-{
-  "type": "std:test-connection",
-  "input": {},
-  "config": {
-    "serviceModeApiUrl": "https://your-commander-host.example.com",
-    "serviceModeApiKey": "<service-mode-api-key>",
-    "pollTimeoutSeconds": "60"
-  }
-}
-```
-
-### Optional: CLI validate
-
-```bash
-sail conn validate -p config.json -c keeper-security -r
-```
-
-Example `config.json` (local only — do not commit):
-
-```json
-{
-  "serviceModeApiUrl": "https://your-commander-host.example.com",
-  "serviceModeApiKey": "<service-mode-api-key>",
-  "pollTimeoutSeconds": "60"
-}
-```
+1. In ISC, open **Admin → Connections → Sources** (or the **Marketplace / Connector Catalog**, depending on your tenant UI).
+2. Find **Keeper Security** and select **Configure** / **Create Source**.
+3. Complete the source configuration fields below, then save.
+4. Run **Test Connection**.
+5. Configure **account correlation**, then run **entitlement aggregation** followed by **account aggregation**.
 
 ---
 
-## Build and package for upload
+## Source configuration
 
-```bash
-npm run build
-npm run pack-zip
-```
-
-Output: packaged zip under `dist/` (contains `index.js` + `connector-spec.json` only).
-
-```bash
-sail env use keeper-poc
-sail conn create keeper-security   # first time only
-sail conn upload -c keeper-security -f dist/keeper-security-0.1.0.zip
-sail conn list
-```
-
-Re-upload after code changes: bump `package.json` version, rebuild, upload.
+| Field | Required | Description |
+|---|---|---|
+| **Keeper Commander Service Mode API URL** | Yes | Base URL of Commander Service Mode **without** the `/api/v2/` path (example: `https://commander.example.com`) |
+| **Keeper Commander Service Mode API Key** | Yes | Service Mode API key used for authentication |
+| **Keeper Service Mode Poll Timeout (seconds)** | No | How long the connector waits for a Commander command to finish. Default: `60` |
 
 ---
 
-## Create source in ISC
+## Account schema (summary)
 
-1. Admin → Connections → Sources → Create New Source → **keeper-security**
-2. Enter:
-   - **Keeper Commander Service Mode API URL**
-   - **Keeper Commander Service Mode API Key**
-   - Optional **Poll Timeout (seconds)**
-3. Test Connection → (then Account / Entitlement Aggregation once those handlers ship)
+| Attribute | Notes |
+|---|---|
+| **email** | Account identity (required) |
+| **name** | Display name (required on create) |
+| **userId** | Keeper enterprise user id (read-only) |
+| **status** | Keeper status (`Active`, `Invited`, `Locked`, …) |
+| **jobTitle** | Optional; set on create |
+| **twoFactorEnabled** | Read-only |
+| **aliases** | Read-only |
+| **node** | Managed entitlement (required on create; single-valued) |
+| **teams** | Managed entitlement (multi) |
+| **roles** | Managed entitlement (multi) |
+| **folders** | Managed entitlement (multi) |
+| **records** | Managed entitlement (multi) |
 
-Credentials live **only** in ISC source config. Never commit or zip them.
+### Account status in ISC
 
----
+| Keeper `status` | ISC account state |
+|---|---|
+| `Active` | Enabled |
+| `Invited`, `Locked`, and other non-active values | Disabled |
 
-## Auth / runtime notes
-
-| Issue | Meaning |
-|-------|---------|
-| `401` / unauthorized | Invalid or missing `serviceModeApiKey` |
-| Connection refused / DNS | `serviceModeApiUrl` unreachable from the runtime (local or ISC egress) |
-| Poll timed out | Commander did not finish before `pollTimeoutSeconds`; increase timeout or check Service Mode health |
-| Unexpected response status | Service Mode returned a non-success result; inspect Commander logs |
-
-Aggregation/provisioning in ISC cloud requires a working Test Connection first.
-
----
-
-## Commands reference
-
-```bash
-npm install
-npm run build
-npm run pack-zip
-npm run dev
-sail conn upload -c keeper-security -f dist/keeper-security-0.1.0.zip
-sail conn list
-```
+ISC **Enable** / **Disable** call Keeper unlock / lock. Use the **status** attribute when you need the native Keeper value.
 
 ---
 
-## Version
+## Recommended setup in ISC
 
-- Connector: `keeper-security@0.1.0`
+### 1. Correlation
+
+Correlate Keeper accounts to identities by email, for example:
+
+- Account attribute **email** → Identity attribute **Work Email** (or the attribute that holds corporate email in your tenant)
+
+Without a matching identity, aggregated accounts remain **uncorrelated**.
+
+### 2. Aggregation order
+
+1. Run **Entitlement Aggregation** first (nodes, teams, roles, folders, records).
+2. Run **Account Aggregation** second so entitlement assignments resolve correctly.
+
+Re-run account aggregation after major entitlement catalog changes.
+
+### 3. Provisioning
+
+Enable provisioning on the source when you want create / update / enable / disable / delete from ISC.
+
+**Create account** typically requires:
+
+- **email**
+- **name**
+- **node** (Keeper node id)
+
+Optional on create: **jobTitle**, initial **roles** / **teams** (Note: These **roles/teams** will only be assigned to the user once they become **active**.).
+
+**Account update** is entitlement-focused (node, teams, roles, folders, records). Profile fields such as **name** and **jobTitle** are applied at create time and are not updated by the connector’s update handler.
+
+Configure a **Create Account** provisioning policy so ISC can populate required attributes (including dynamic **node** mapping via transforms when needed).
+
+### 4. Entitlement capability gates
+
+During `sailpoint-app-setup`, choose which entitlement types Service Mode may manage: **folders**, **records**, **roles**, and **teams** (each Yes/No, default Yes). Plan which types should be in scope for IGA before enabling wide aggregation or assignment. Nodes are always allowed.
+
+---
+
+## Operational notes
+
+| Topic | Guidance |
+|---|---|
+| **Test Connection** | Validates reachability and Commander session. Fix connectivity before aggregating. |
+| **Delete** | Permanently removes the Keeper enterprise user. The connector refuses to delete the Commander service account itself. |
+| **Partial entitlement updates** | When multiple folder/record changes are requested, the connector continues after individual failures and reports aggregated errors for items that did not succeed. |
+| **Poll timeout** | Increase **Poll Timeout** if Commander commands frequently time out on large enterprises. |
+
+---
+
+## Troubleshooting
+
+| Symptom | What to check |
+|---|---|
+| Test Connection fails (401 / unauthorized) | Service Mode API key; Commander login session |
+| Test Connection fails (timeout / unreachable) | URL (no `/api/v2/`), DNS, firewall / ISC egress to Commander |
+| Aggregation incomplete or stale | Commander Service Mode health; increase poll timeout; re-run entitlement then account aggregation |
+| All accounts uncorrelated | Correlation rule and identity email population from your authoritative source |
+| Create fails missing node/name/email | Create Account provisioning policy mappings |
+| Enable / Disable missing in UI | Source provisioning enabled; account not treated as ISC “locked” (connector maps Keeper lock to Disabled) |
+
+---
+
+## Resources
+- [Keeper Enterprise Guide](https://docs.keeper.io/enterprise-guide)
+- [Keeper Commander Service Mode](https://docs.keeper.io/keeperpam/commander-cli/service-mode-rest-api)
+
+## Support
+
+For support or feature requests, please [open a Github issue](https://github.com/Keeper-Security/sailpoint-saas-connector/issues) or contact:
+- Email: commander@keepersecurity.com

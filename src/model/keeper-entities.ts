@@ -71,13 +71,21 @@ export interface KeeperNode {
     provisioning?: unknown
 }
 
+/**
+ * Flat record used by entitlement mapping (normalized from vault tree nodes).
+ */
 export interface KeeperRecord {
     record_uid: string
+    record_uid_perm: string
     title: string
     record_category: string
     type: string
+    path: string
+    permission: string
+    users?: string[]
 }
-export type KeeperFolderType = 'classic' | 'nsf'
+
+export type KeeperFolderType = 'classic' | 'nsf' | 'non-sharable'
 
 export interface KeeperFolder {
     uid: string
@@ -85,7 +93,69 @@ export interface KeeperFolder {
     path: string
     folderType: KeeperFolderType
     parentId?: string
-    /** Filled later when membership discovery exists */
-    users?: string[]
-    teams?: string[]
+    /**
+     * Lowercase email → tree ACL permission codes for that user
+     * (classic: MU, MR, RO, …; NSF: VW, SM, CM, CSM, FM, OW, …).
+     */
+    userPermissions?: Record<string, string[]>
+    /**
+     * Team uid → tree ACL permission codes for that team
+     * (same classic/NSF codes as users).
+     */
+    teamPermissions?: Record<string, string[]>
+}
+
+// -------------------- Vault tree (`tree -s -ns -r -v --format json`) --------------------
+
+/** Root-level code → label map (`data.share_permissions_key`). */
+export interface KeeperSharePermissionsKey {
+    classic: { [key: string]: string }
+    nsf: { [key: string]: string }
+}
+
+export interface KeeperShareUser {
+    email: string
+    permissions: string[]
+    uid?: string
+}
+
+/** Team share entry under `share_permissions.teams`. */
+export interface KeeperShareTeam {
+    name: string
+    uid: string
+    permissions: string[]
+}
+
+/** classic `shared_folder` / NSF folder ACL (users + optional teams). */
+export interface KeeperFolderSharePermissions {
+    record_permissions?: string[]
+    user_permissions?: string[]
+    users?: KeeperShareUser[]
+    teams?: KeeperShareTeam[]
+}
+
+/** `record` / `nested_record` / `nested_share_folder` ACL. */
+export interface KeeperUserSharePermissions {
+    users?: KeeperShareUser[]
+    teams?: KeeperShareTeam[]
+}
+
+/**
+ * Recursive vault tree node (`data.tree` and each entry in `children`).
+ * `children` is an array of nodes, not a string dictionary.
+ */
+export interface KeeperVaultTreeNode {
+    kind: string
+    name: string
+    path: string
+    uid?: string
+    record_type?: string
+    share_permissions?: KeeperFolderSharePermissions | KeeperUserSharePermissions
+    children?: KeeperVaultTreeNode[]
+}
+
+/** Parsed `data` payload from the vault tree command. */
+export interface KeeperVaultTreeData {
+    share_permissions_key: KeeperSharePermissionsKey
+    tree: KeeperVaultTreeNode
 }

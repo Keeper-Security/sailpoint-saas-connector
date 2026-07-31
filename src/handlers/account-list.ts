@@ -1,12 +1,7 @@
-import {
-    Context,
-    logger,
-    Response,
-    StdAccountListInput,
-    StdAccountListOutput,
-} from '@sailpoint/connector-sdk'
+import { Context, logger, Response, StdAccountListInput, StdAccountListOutput } from '@sailpoint/connector-sdk'
 import { KeeperClient } from '../client/keeper-client'
-import { buildAccountMaps, toAccount } from '../utils/keeper-mappings'
+import { buildAccountMaps, buildRecordMaps, toAccount } from '../utils/keeper-mappings'
+import { getAllShareableFolders, getRecordList } from '../utils/helper'
 
 export function createAccountListHandler(client: KeeperClient) {
     return async (
@@ -15,20 +10,29 @@ export function createAccountListHandler(client: KeeperClient) {
         res: Response<StdAccountListOutput>
     ): Promise<void> => {
         logger.info('Listing Keeper vault accounts')
+
         await client.syncEnterprise()
         logger.info('Synced enterprise')
+
         await client.syncVault()
         logger.info('Synced vault')
 
-        const folders = await client.listAllFolders()
+        // One vault-tree round-trip for both folders and records.
+        const vaultTree = await client.listVaultTree()
+        const folders = getAllShareableFolders(vaultTree)
+        const records = getRecordList(vaultTree)
+
         const maps = buildAccountMaps(folders)
+        const recordMaps = buildRecordMaps(records)
+
         logger.info(`Loaded catalog: ${folders.length} folders`)
+        logger.info(`Loaded catalog: ${records.length} records`)
 
         const users = await client.listUsers()
         logger.info(`Fetched ${users.length} Keeper users`)
 
         for (const user of users) {
-            res.send(toAccount(user, maps))
+            res.send(toAccount(user, maps, recordMaps))
         }
     }
 }

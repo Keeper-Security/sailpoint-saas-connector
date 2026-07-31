@@ -1,8 +1,8 @@
 import { createConnector, readConfig } from '@sailpoint/connector-sdk'
 import { KeeperClient } from './client/keeper-client'
 import { createAccountCreateHandler } from './handlers/account-create'
-import { createAccountDisableHandler } from './handlers/account-disable'
-import { createAccountEnableHandler } from './handlers/account-enable'
+import { createAccountDeleteHandler } from './handlers/account-delete'
+import { createAccountDisableHandler, createAccountEnableHandler } from './handlers/account-lock'
 import { createAccountListHandler } from './handlers/account-list'
 import { createAccountReadHandler } from './handlers/account-read'
 import { createAccountUpdateHandler } from './handlers/account-update'
@@ -24,6 +24,7 @@ export const connector = async () => {
         .stdAccountRead(createAccountReadHandler(client))
         .stdAccountCreate(createAccountCreateHandler(client))
         .stdAccountUpdate(createAccountUpdateHandler(client))
+        .stdAccountDelete(createAccountDeleteHandler(client))
         .stdAccountDisable(createAccountDisableHandler(client))
         .stdAccountEnable(createAccountEnableHandler(client))
 }

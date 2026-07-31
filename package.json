@@ -1,6 +1,6 @@
 {
   "name": "keeper-security",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "main": "dist/index.js",
   "scripts": {
     "clean": "shx rm -rf ./dist",
@@ -19,7 +19,7 @@
     "axios": "^1.18.1"
   },
   "devDependencies": {
-    "@types/jest": "^27.0.1",
+    "@types/jest": "^27.5.2",
     "@types/node": "18.19.68",
     "@vercel/ncc": "^0.38.1",
     "cross-env": "7.0.3",
@@ -35,6 +35,11 @@
   "jest": {
     "preset": "ts-jest",
     "testEnvironment": "node",
+    "globals": {
+      "ts-jest": {
+        "tsconfig": "tests/tsconfig.json"
+      }
+    },
     "roots": [
       "<rootDir>/tests"
     ],
@@ -49,10 +54,10 @@
     "collectCoverage": true,
     "coverageThreshold": {
       "global": {
-        "statements": 60,
-        "branches": 50,
-        "functions": 40,
-        "lines": 60
+        "statements": 85,
+        "branches": 85,
+        "functions": 85,
+        "lines": 85
       }
     }
   },
