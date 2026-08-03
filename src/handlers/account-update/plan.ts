@@ -7,22 +7,16 @@ import {
 } from '@sailpoint/connector-sdk'
 import { KeeperClient, UpdateUserOptions } from '../../client/keeper-client'
 import { buildAccountMaps } from '../../utils/keeper-mappings'
-import { coerceNonEmptyStrings, getAllShareableFolders, getRecordListByEmail, normalizeString, requireSingleNodeId } from '../../utils/helper'
+import {
+    coerceNonEmptyStrings,
+    firstEntitlementValue,
+    getAllShareableFolders,
+    getRecordListByEmail,
+    normalizeString,
+    requireSingleNodeId,
+} from '../../utils/helper'
 
-/**
- * Non-entitlement attributes this handler does not mutate. Profile fields
- * (`name`, `jobTitle`) are set at create time only; updates are entitlement
- * driven (node / teams / roles / folders / records). Keeper-owned fields are
- * also skipped. `email` is handled separately (identity — rejected unless no-op).
- */
-export const READ_ONLY_ATTRS = new Set([
-    'userId',
-    'status',
-    'twoFactorEnabled',
-    'aliases',
-    'name',
-    'jobTitle',
-])
+export const READ_ONLY_ATTRS = new Set(['userId', 'status', 'twoFactorEnabled'])
 
 /** Add/remove ID sets for one multi-valued entitlement attribute. */
 export interface MembershipDelta {
@@ -53,15 +47,38 @@ export function hasDeltaWork(delta: MembershipDelta): boolean {
     return delta.adds.size > 0 || delta.removes.size > 0
 }
 
-/** True when enterprise-user flags (node / roles / teams) need to run. */
+/**
+ * True when enterprise-user flags (profile / node / roles / teams / email rename)
+ * need to run. Email rename is expressed as `addAliasValues` because Keeper's
+ * `--add-alias` promotes the new address to primary.
+ */
 export function hasUserMutation(opts: UpdateUserOptions): boolean {
     return (
+        opts.name !== undefined ||
+        opts.jobTitle !== undefined ||
         opts.nodeId !== undefined ||
         (opts.addRoleValues?.length ?? 0) > 0 ||
         (opts.removeRoleValues?.length ?? 0) > 0 ||
         (opts.addTeamValues?.length ?? 0) > 0 ||
-        (opts.removeTeamValues?.length ?? 0) > 0
+        (opts.removeTeamValues?.length ?? 0) > 0 ||
+        (opts.addAliasValues?.length ?? 0) > 0
     )
+}
+
+/** Profile / node / roles / teams only — excludes email rename (`addAliasValues`). */
+export function withoutEmailRename(opts: UpdateUserOptions): UpdateUserOptions {
+    return {
+        email: opts.email,
+        name: opts.name,
+        jobTitle: opts.jobTitle,
+        nodeId: opts.nodeId,
+        addRoleValues: opts.addRoleValues,
+        removeRoleValues: opts.removeRoleValues,
+        addTeamValues: opts.addTeamValues,
+        removeTeamValues: opts.removeTeamValues,
+        addRecordValues: opts.addRecordValues,
+        removeRecordValues: opts.removeRecordValues,
+    }
 }
 
 export function toUserUpdateOptions(plan: UpdatePlan): UpdateUserOptions {
@@ -74,19 +91,24 @@ export function toUserUpdateOptions(plan: UpdatePlan): UpdateUserOptions {
     }
 }
 
+/** New primary email when the plan renames via Keeper `--add-alias`, else undefined. */
+export function plannedNewEmail(plan: UpdatePlan): string | undefined {
+    return plan.opts.addAliasValues?.[0]
+}
+
 /** Pick a schema attribute for Result reporting when enterprise-user fails. */
 export function primaryUserMutationAttribute(opts: UpdateUserOptions): string {
+    if ((opts.addAliasValues?.length ?? 0) > 0) return 'email'
+    if (opts.name !== undefined) return 'name'
+    if (opts.jobTitle !== undefined) return 'jobTitle'
     if (opts.nodeId !== undefined) return 'node'
     if ((opts.addRoleValues?.length ?? 0) > 0 || (opts.removeRoleValues?.length ?? 0) > 0) return 'roles'
-    return 'teams'
+    if ((opts.addTeamValues?.length ?? 0) > 0 || (opts.removeTeamValues?.length ?? 0) > 0) return 'teams'
+    return 'email'
 }
 
 export function hasWork(plan: UpdatePlan): boolean {
-    return (
-        hasUserMutation(toUserUpdateOptions(plan)) ||
-        hasDeltaWork(plan.folders) ||
-        hasDeltaWork(plan.records)
-    )
+    return hasUserMutation(toUserUpdateOptions(plan)) || hasDeltaWork(plan.folders) || hasDeltaWork(plan.records)
 }
 
 /**
@@ -111,7 +133,7 @@ export async function loadCurrentMemberships(
     email: string,
     changes: AttributeChange[]
 ): Promise<CurrentMemberships> {
-    const needsRolesOrTeams = changes.some(
+    const needsUserProfile = changes.some(
         (c) => c.op === AttributeChangeOp.Set && (c.attribute === 'roles' || c.attribute === 'teams')
     )
     const needsFolders = changes.some((c) => c.op === AttributeChangeOp.Set && c.attribute === 'folders')
@@ -124,7 +146,7 @@ export async function loadCurrentMemberships(
         recordIds: [],
     }
 
-    if (needsRolesOrTeams) {
+    if (needsUserProfile) {
         const user = await client.getUser(email)
         if (!user) {
             throw new ConnectorError(`Keeper user with email "${email}" not found`, ConnectorErrorType.NotFound)
@@ -159,6 +181,21 @@ export function buildUpdatePlan(email: string, changes: AttributeChange[], curre
 
     for (const change of changes) {
         switch (change.attribute) {
+            case 'name':
+                applyProfileStringChange(change, 'name', (v) => {
+                    plan.opts.name = v
+                })
+                break
+            case 'jobTitle':
+                applyProfileStringChange(
+                    change,
+                    'jobTitle',
+                    (v) => {
+                        plan.opts.jobTitle = v
+                    },
+                    { allowClear: true }
+                )
+                break
             case 'node':
                 applyNodeChange(change, (v) => {
                     plan.opts.nodeId = v
@@ -177,8 +214,16 @@ export function buildUpdatePlan(email: string, changes: AttributeChange[], curre
                 applyMultiValuedChange(change, plan.records, current.recordIds)
                 break
             case 'email':
-                rejectEmailChange(change, email)
+                applyEmailChange(change, email, (newEmail) => {
+                    plan.opts.addAliasValues = [newEmail]
+                })
                 break
+            case 'aliases':
+                throw new ConnectorError(
+                    'cannot manage "aliases" via std:account:update; ' +
+                        'Keeper --add-alias promotes the address to primary. ' +
+                        'To rename the account, Set the "email" attribute to the new primary address.'
+                )
             default:
                 warnSkippedAttribute(change, email)
         }
@@ -232,22 +277,67 @@ function applyNodeChange(change: AttributeChange, assign: (value: string) => voi
     assign(requireSingleNodeId(change.value, 'std:account:update attribute "node" cannot be empty'))
 }
 
-function rejectEmailChange(change: AttributeChange, currentEmail: string): void {
-    // A Set that matches the current identity is a harmless no-op that some
-    // provisioning policies emit; let it through silently. Anything else is a
-    // real attempt to move the identity, which this connector does not support.
-    if (change.op === AttributeChangeOp.Set) {
-        const desired = normalizeString(change.value)
-        if (desired && desired.toLowerCase() === currentEmail.toLowerCase()) {
+/**
+ * Single-valued profile fields (`name`, `jobTitle`).
+ * - Set/Add: require a non-empty string (unless allowClear and value is empty for jobTitle clear).
+ * - Remove: clear when allowClear (jobTitle → ''); otherwise skip (name cannot be cleared).
+ */
+function applyProfileStringChange(
+    change: AttributeChange,
+    attribute: 'name' | 'jobTitle',
+    assign: (value: string) => void,
+    opts: { allowClear?: boolean } = {}
+): void {
+    if (change.op === AttributeChangeOp.Remove) {
+        if (opts.allowClear) {
+            assign('')
             return
         }
+        logger.info(`std:account:update ignoring Remove on "${attribute}" — value cannot be cleared`)
+        return
     }
-    throw new ConnectorError('cannot change "email" via std:account:update; email is the account identity')
+
+    const value = firstEntitlementValue(change.value)
+    if (value === undefined) {
+        // Explicit empty jobTitle on Set clears the field in Commander.
+        if (opts.allowClear && (change.value === '' || change.value === null)) {
+            assign('')
+            return
+        }
+        throw new ConnectorError(`std:account:update attribute "${attribute}" cannot be empty`)
+    }
+    assign(value)
+}
+
+/**
+ * Primary email change from ISC Attribute Sync / Update Account.
+ *
+ * Keeper has no separate "rename email" API — `--add-alias <new>` on the
+ * current primary promotes `<new>` to primary and demotes the old address to
+ * an alias. A Set that matches the current identity is a no-op some policies
+ * emit; only a different address is forwarded as `addAliasValues`.
+ */
+function applyEmailChange(
+    change: AttributeChange,
+    currentEmail: string,
+    assign: (newEmail: string) => void
+): void {
+    if (change.op === AttributeChangeOp.Remove) {
+        logger.info('std:account:update ignoring Remove on "email" — primary email cannot be cleared')
+        return
+    }
+
+    const desired = firstEntitlementValue(change.value) ?? normalizeString(change.value)
+    if (!desired) {
+        throw new ConnectorError('std:account:update attribute "email" cannot be empty')
+    }
+    if (desired.toLowerCase() === currentEmail.toLowerCase()) {
+        return
+    }
+    assign(desired)
 }
 
 function warnSkippedAttribute(change: AttributeChange, email: string): void {
     const kind = READ_ONLY_ATTRS.has(change.attribute) ? 'read-only' : 'unknown'
-    logger.warn(
-        `std:account:update ignoring ${kind} attribute "${change.attribute}" (op=${change.op}) for ${email}`
-    )
+    logger.warn(`std:account:update ignoring ${kind} attribute "${change.attribute}" (op=${change.op}) for ${email}`)
 }

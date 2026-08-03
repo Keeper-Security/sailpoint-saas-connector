@@ -4,7 +4,13 @@ import { loadAccountView } from '../utils/account-view'
 import { resolveAccountEmail } from '../utils/identity'
 import { applyUpdatePlan } from './account-update/apply'
 import { formatAggregatedError, toAttributeResults } from './account-update/errors'
-import { assertAtMostOneNodeAssign, buildUpdatePlan, hasWork, loadCurrentMemberships } from './account-update/plan'
+import {
+    assertAtMostOneNodeAssign,
+    buildUpdatePlan,
+    hasWork,
+    loadCurrentMemberships,
+    plannedNewEmail,
+} from './account-update/plan'
 
 export function createAccountUpdateHandler(client: KeeperClient) {
     return async (
@@ -40,8 +46,13 @@ export function createAccountUpdateHandler(client: KeeperClient) {
 
         logger.info(`Updating Keeper vault account ${email}`)
         const failures = await applyUpdatePlan(client, email, plan)
-        const account = await loadAccountView(client, email, {
-            notFoundMessage: `Keeper user with email "${email}" not found after update`,
+
+        // After a successful --add-alias rename, Keeper's primary is the new
+        // address; reload under that identity so ISC stores the updated key.
+        const emailRenameFailed = failures.some((f) => f.attribute === 'email')
+        const resultEmail = !emailRenameFailed && plannedNewEmail(plan) ? plannedNewEmail(plan)! : email
+        const account = await loadAccountView(client, resultEmail, {
+            notFoundMessage: `Keeper user with email "${resultEmail}" not found after update`,
         })
 
         if (failures.length === 0) {

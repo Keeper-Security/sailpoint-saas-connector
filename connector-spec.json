@@ -87,7 +87,7 @@
 			{
 				"name": "aliases",
 				"type": "string",
-				"description": "Alternate email aliases",
+				"description": "Alternate email aliases (read-only). Primary email changes are provisioned via the email attribute using Keeper.",
 				"multi": true
 			},
 			{

@@ -64,6 +64,11 @@ describe('account-update/plan', () => {
         expect(hasDeltaWork({ adds: new Set(['a']), removes: new Set() })).toBe(true)
         expect(hasUserMutation({ email: 'a@example.test' })).toBe(false)
         expect(hasUserMutation({ email: 'a@example.test', nodeId: '1' })).toBe(true)
+        expect(hasUserMutation({ email: 'a@example.test', name: 'A' })).toBe(true)
+        expect(hasUserMutation({ email: 'a@example.test', addAliasValues: ['a@x.test'] })).toBe(true)
+        expect(primaryUserMutationAttribute({ email: 'a', addAliasValues: ['b@x.test'] })).toBe('email')
+        expect(primaryUserMutationAttribute({ email: 'a', name: 'A' })).toBe('name')
+        expect(primaryUserMutationAttribute({ email: 'a', jobTitle: 'Eng' })).toBe('jobTitle')
         expect(primaryUserMutationAttribute({ email: 'a', nodeId: '1' })).toBe('node')
         expect(primaryUserMutationAttribute({ email: 'a', addRoleValues: ['1'] })).toBe('roles')
         expect(primaryUserMutationAttribute({ email: 'a', addTeamValues: ['t'] })).toBe('teams')
@@ -81,7 +86,7 @@ describe('account-update/plan', () => {
         ).not.toThrow()
     })
 
-    it('buildUpdatePlan covers set/add/remove and skips read-only', () => {
+    it('buildUpdatePlan covers set/add/remove including profile fields', () => {
         const plan = buildUpdatePlan(
             'alice@example.test',
             [
@@ -93,7 +98,8 @@ describe('account-update/plan', () => {
                 { attribute: 'folders', op: AttributeChangeOp.Add, value: 'sf-classic-001:MU' },
                 { attribute: 'records', op: AttributeChangeOp.Remove, value: 'rec-classic-001:RO' },
                 { attribute: 'email', op: AttributeChangeOp.Set, value: 'alice@example.test' },
-                { attribute: 'name', op: AttributeChangeOp.Set, value: 'Nope' },
+                { attribute: 'name', op: AttributeChangeOp.Set, value: 'Alice Updated' },
+                { attribute: 'jobTitle', op: AttributeChangeOp.Set, value: 'Engineer' },
                 { attribute: 'customAttr', op: AttributeChangeOp.Set, value: 'x' },
             ],
             {
@@ -105,6 +111,9 @@ describe('account-update/plan', () => {
         )
 
         expect(plan.opts.nodeId).toBe('200')
+        expect(plan.opts.name).toBe('Alice Updated')
+        expect(plan.opts.jobTitle).toBe('Engineer')
+        expect(plan.opts.addAliasValues).toBeUndefined()
         expect([...plan.roles.adds]).toEqual(['3'])
         expect([...plan.roles.removes]).toEqual(['1'])
         expect([...plan.teams.adds]).toEqual(['team-uid-002'])
@@ -115,19 +124,29 @@ describe('account-update/plan', () => {
         expect(toUserUpdateOptions(plan).addRoleValues).toEqual(['3'])
     })
 
-    it('rejects email identity changes', () => {
+    it('maps email Set to Keeper --add-alias rename', () => {
+        const plan = buildUpdatePlan(
+            'alice@example.test',
+            [{ attribute: 'email', op: AttributeChangeOp.Set, value: 'alice.new@example.test' }],
+            { roleIds: [], teamIds: [], folderIds: [], recordIds: [] }
+        )
+        expect(plan.opts.addAliasValues).toEqual(['alice.new@example.test'])
+        expect(hasWork(plan)).toBe(true)
+    })
+
+    it('rejects aliases attribute changes', () => {
         expect(() =>
             buildUpdatePlan(
                 'alice@example.test',
-                [{ attribute: 'email', op: AttributeChangeOp.Set, value: 'other@example.test' }],
+                [{ attribute: 'aliases', op: AttributeChangeOp.Add, value: 'alias@example.test' }],
                 { roleIds: [], teamIds: [], folderIds: [], recordIds: [] }
             )
-        ).toThrow(/cannot change "email"/)
+        ).toThrow(/cannot manage "aliases"/)
     })
 
     it('loadCurrentMemberships loads only what Set ops need', async () => {
         const client = createMockKeeperClient({
-            getUser: jest.fn().mockResolvedValue(alice),
+            getUser: jest.fn().mockResolvedValue({ ...alice, alias: ['a@example.test'] }),
             listVaultTree: jest.fn().mockResolvedValue(mockVaultTree),
         })
         const current = await loadCurrentMemberships(asKeeperClient(client), 'alice@example.test', [
@@ -287,6 +306,35 @@ describe('account-update/apply', () => {
         expect(failures.filter((f) => f.attribute === 'folders').length).toBeGreaterThan(0)
         expect(failures.filter((f) => f.attribute === 'records')).toHaveLength(2)
     })
+
+    it('renames email via --add-alias after other mutations', async () => {
+        const client = createMockKeeperClient()
+        const failures = await applyUpdatePlan(asKeeperClient(client), 'alice@example.test', {
+            opts: {
+                email: 'alice@example.test',
+                name: 'Alice Updated',
+                addAliasValues: ['alice.new@example.test'],
+            },
+            roles: emptyDelta(),
+            teams: emptyDelta(),
+            folders: emptyDelta(),
+            records: emptyDelta(),
+        })
+        expect(failures).toEqual([])
+        expect(client.updateUser).toHaveBeenCalledTimes(2)
+        expect(client.updateUser).toHaveBeenNthCalledWith(
+            1,
+            expect.objectContaining({
+                email: 'alice@example.test',
+                name: 'Alice Updated',
+            })
+        )
+        expect(client.updateUser.mock.calls[0][0].addAliasValues).toBeUndefined()
+        expect(client.updateUser).toHaveBeenNthCalledWith(2, {
+            email: 'alice@example.test',
+            addAliasValues: ['alice.new@example.test'],
+        })
+    })
 })
 
 describe('account-update handler', () => {
@@ -309,11 +357,83 @@ describe('account-update handler', () => {
             createMockContext(),
             {
                 identity: 'alice@example.test',
-                changes: [{ attribute: 'name', op: AttributeChangeOp.Set, value: 'x' }],
+                changes: [{ attribute: 'status', op: AttributeChangeOp.Set, value: 'Locked' }],
             } as any,
             res2
         )
         expect(sent2).toHaveLength(1)
+        expect(client.updateUser).not.toHaveBeenCalled()
+
+        const { res: res3, sent: sent3 } = createMockResponse()
+        await createAccountUpdateHandler(asKeeperClient(client))(
+            createMockContext(),
+            {
+                identity: 'alice@example.test',
+                changes: [
+                    { attribute: 'name', op: AttributeChangeOp.Set, value: 'Alice Updated' },
+                    { attribute: 'jobTitle', op: AttributeChangeOp.Set, value: 'Lead' },
+                ],
+            } as any,
+            res3
+        )
+        expect(sent3).toHaveLength(1)
+        expect(client.updateUser).toHaveBeenCalledWith(
+            expect.objectContaining({
+                email: 'alice@example.test',
+                name: 'Alice Updated',
+                jobTitle: 'Lead',
+            })
+        )
+    })
+
+    it('renames email and returns account under the new primary', async () => {
+        const renamed = {
+            ...alice,
+            email: 'alice.new@example.test',
+            alias: ['alice@example.test'],
+        }
+        const client = createMockKeeperClient({
+            getUser: jest.fn().mockResolvedValue(renamed),
+            listVaultTree: jest.fn().mockResolvedValue(mockVaultTree),
+        })
+        const { res, sent } = createMockResponse()
+        await createAccountUpdateHandler(asKeeperClient(client))(
+            createMockContext(),
+            {
+                identity: 'alice@example.test',
+                changes: [
+                    { attribute: 'email', op: AttributeChangeOp.Set, value: 'alice.new@example.test' },
+                ],
+            } as any,
+            res
+        )
+        expect(client.updateUser).toHaveBeenCalledWith({
+            email: 'alice@example.test',
+            addAliasValues: ['alice.new@example.test'],
+        })
+        expect(client.getUser).toHaveBeenCalledWith('alice.new@example.test')
+        expect(sent[0].identity).toBe('alice.new@example.test')
+        expect(sent[0].attributes.email).toBe('alice.new@example.test')
+    })
+
+    it('rejects aliases changes from the handler', async () => {
+        const client = createMockKeeperClient({
+            getUser: jest.fn().mockResolvedValue(alice),
+            listVaultTree: jest.fn().mockResolvedValue(mockVaultTree),
+        })
+        const { res } = createMockResponse()
+        await expect(
+            createAccountUpdateHandler(asKeeperClient(client))(
+                createMockContext(),
+                {
+                    identity: 'alice@example.test',
+                    changes: [
+                        { attribute: 'aliases', op: AttributeChangeOp.Add, value: 'alias@example.test' },
+                    ],
+                } as any,
+                res
+            )
+        ).rejects.toThrow(/cannot manage "aliases"/)
         expect(client.updateUser).not.toHaveBeenCalled()
     })
 

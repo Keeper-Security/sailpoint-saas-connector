@@ -293,12 +293,16 @@ describe('KeeperClient', () => {
             nodeId: '2',
             removeRoleValues: ['1'],
             removeTeamValues: ['t'],
+            removeAliasValues: ['old@example.test'],
             addRoleValues: ['2'],
             addTeamValues: ['t2'],
+            addAliasValues: ['new@example.test'],
         })
         const cmd = lastCommand()
         expect(cmd).toContain('--remove-role')
         expect(cmd).toContain('--add-team')
+        expect(cmd).toContain('--delete-alias "old@example.test"')
+        expect(cmd).toContain('--add-alias "new@example.test"')
     })
 
     it('updateRecordPermissions covers classic/nsf codes and rejects OW/invalid', async () => {

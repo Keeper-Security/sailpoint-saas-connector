@@ -60,6 +60,10 @@ export interface WhoamiInfo {
  * are the pre-computed membership deltas. Each entry may be either a stable
  * ID (role_id / team_uid) or a display name — Commander accepts both.
  *
+ * `addAliasValues` is used for primary email rename: Keeper's `--add-alias`
+ * promotes the new address to primary and demotes the previous primary to an
+ * alias. Do not use it to manage secondary emails as a multi-valued attribute.
+ *
  * `addRecordValues` / `removeRecordValues` are used by `updateRecordPermissions`
  * only — `updateUser` ignores them.
  */
@@ -72,6 +76,8 @@ export interface UpdateUserOptions {
     removeRoleValues?: string[]
     addTeamValues?: string[]
     removeTeamValues?: string[]
+    addAliasValues?: string[]
+    removeAliasValues?: string[]
     addRecordValues?: string[]
     removeRecordValues?: string[]
 }
@@ -341,8 +347,10 @@ export class KeeperClient {
 
         for (const v of options.removeRoleValues ?? []) parts.push(`--remove-role "${this.escapeArg(v)}"`)
         for (const v of options.removeTeamValues ?? []) parts.push(`--remove-team "${this.escapeArg(v)}"`)
+        for (const v of options.removeAliasValues ?? []) parts.push(`--delete-alias "${this.escapeArg(v)}"`)
         for (const v of options.addRoleValues ?? []) parts.push(`--add-role "${this.escapeArg(v)}"`)
         for (const v of options.addTeamValues ?? []) parts.push(`--add-team "${this.escapeArg(v)}"`)
+        for (const v of options.addAliasValues ?? []) parts.push(`--add-alias "${this.escapeArg(v)}"`)
 
         if (parts.length === 1) {
             logger.info(
