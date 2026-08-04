@@ -1,0 +1,119 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish to ISC (uncheck to build and scan SBOM only)'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm test
+
+  generate-sbom:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+
+      - name: Read version
+        id: version
+        run: echo "value=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
+
+      - name: Install Syft and Manifest CLI
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin v1.32.0
+          curl -sSfL https://raw.githubusercontent.com/manifest-cyber/cli/main/install.sh | sh -s -- -b /usr/local/bin v0.35.0
+
+      - name: Generate and publish SBOM
+        env:
+          MANIFEST_API_KEY: ${{ secrets.MANIFEST_TOKEN }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          manifest sbom "." --generator=syft \
+            --name=sailpoint-saas-connector --version="${VERSION}" \
+            --output=spdx-json --file=sbom.json \
+            --api-key="${MANIFEST_API_KEY}" --publish=true
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: sbom-${{ github.run_number }}
+          path: sbom.json
+
+  publish:
+    needs: test
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-latest
+    environment: prod
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+
+      - name: Read version
+        id: version
+        run: echo "value=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
+
+      - name: Fail if version already released
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          if gh release view "v${VERSION}" > /dev/null 2>&1; then
+            echo "::error::Release v${VERSION} already exists. Bump the version in package.json before running this workflow."
+            exit 1
+          fi
+
+      - name: Load secrets from Keeper
+        uses: Keeper-Security/ksm-action@37abbada28637b6478ba845e73d3f8b9676572fe  # master
+        with:
+          keeper-secret-config: ${{ secrets.KSM_SAILPOINT_CONFIG }}
+          secrets: |
+            wBECCpfk8TxHzmm39JBxRw/field/url > env:SAIL_BASE_URL
+            wBECCpfk8TxHzmm39JBxRw/field/login > env:SAIL_CLIENT_ID
+            wBECCpfk8TxHzmm39JBxRw/field/password > env:SAIL_CLIENT_SECRET
+
+      - name: Upload connector to ISC
+        uses: sailpoint-oss/upload-saas-connector@5d4913a4134a7609a2b16fa21b02c3601b51f7a9  # v1
+        with:
+          connector-alias: ${{ vars.CONNECTOR_ALIAS }}
+          base-url: ${{ env.SAIL_BASE_URL }}
+          client-id: ${{ env.SAIL_CLIENT_ID }}
+          client-secret: ${{ env.SAIL_CLIENT_SECRET }}
+          node-version: '20'
+
+      - name: Create GitHub Release
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          gh release create "v${VERSION}" \
+            ./dist/keeper-security-*.zip \
+            --generate-notes \
+            --title "v${VERSION}"
