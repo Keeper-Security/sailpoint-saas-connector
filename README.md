@@ -106,6 +106,7 @@ Queue mode (API v2) is enabled automatically. The command allowlist is limited t
 | **Allow record shares?** | Whether SailPoint may manage record share entitlements (`share-record` / `nsf-share-record`). Default: Yes. |
 | **Allow role assignment?** | Whether SailPoint may assign roles via `enterprise-user` / `enterprise-role`. Default: Yes. |
 | **Allow team assignment?** | Whether SailPoint may assign teams via `enterprise-user`. Default: Yes. |
+| **Transfer target email** | Active user that receives vault data when SailPoint offboards via transfer-user (required). |
 | **Interval seconds** | How often Commander re-checks invited users and applies queued entitlements after they become **Active**. Default: `60`. Minimum: `15`. |
 
 > Disabled capabilities are rejected by Service Mode (HTTP 403). Nodes are never gated — `--node` remains available for invites and moves.
@@ -265,7 +266,7 @@ During `sailpoint-app-setup`, choose which entitlement types Service Mode may ma
 | Topic | Guidance |
 |---|---|
 | **Test Connection** | Validates reachability and Commander session. Fix connectivity before aggregating. |
-| **Delete** | Permanently removes the Keeper enterprise user. The connector refuses to delete the Commander service account itself. |
+| **Delete** | Transfers the user’s Keeper vault to the transfer target user configured in `sailpoint-app-setup`, then removes the leaving account. |
 | **Partial entitlement updates** | When multiple folder/record changes are requested, the connector continues after individual failures and reports aggregated errors for items that did not succeed. |
 | **Poll timeout** | Increase **Poll Timeout** if Commander commands frequently time out on large enterprises. |
 

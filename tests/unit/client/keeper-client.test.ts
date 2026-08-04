@@ -254,6 +254,9 @@ describe('KeeperClient', () => {
         await client.unlockUser('a@example.test')
         mockCommandSuccess([])
         await client.deleteUser('a@example.test')
+        expect(lastCommand()).toContain('transfer-user "a@example.test"')
+        expect(lastCommand()).toContain('-f')
+    
         mockCommandSuccess([])
         await client.syncEnterprise()
         mockCommandSuccess([])

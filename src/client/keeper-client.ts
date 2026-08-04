@@ -289,9 +289,16 @@ export class KeeperClient {
      * and short-circuit on `null` — this method assumes the user exists and
      * will surface a Commander error if they don't.
      */
+    /**
+     * Remove a Keeper enterprise user by transferring their vault to the
+     * configured target user in service mode, then deleting the
+     * source account. Maps ISC `std:account:delete` to Commander's
+     * `transfer-user "<leaving>" -f`.
+     *  sailpoint-app-setup command will append "--target-user "<target>"" to the command.
+     */
     async deleteUser(email: string): Promise<void> {
         const { safe } = this.normalizeEmailArg(email, 'deleteUser')
-        await this.runCommand(`enterprise-user "${safe}" --delete --force`)
+        await this.runCommand(`transfer-user "${safe}" -f`)
     }
 
     /**

@@ -39,7 +39,7 @@
 						{
 							"key": "pollTimeoutSeconds",
 							"label": "Keeper Service Mode Poll Timeout (seconds)",
-							"type": "text",
+							"type": "number",
 							"required": false,
 							"placeholder": "Default is 60 seconds"
 						}
