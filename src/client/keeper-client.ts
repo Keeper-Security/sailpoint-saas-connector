@@ -60,6 +60,10 @@ export interface WhoamiInfo {
  * are the pre-computed membership deltas. Each entry may be either a stable
  * ID (role_id / team_uid) or a display name — Commander accepts both.
  *
+ * `addAliasValues` is used for primary email rename: Keeper's `--add-alias`
+ * promotes the new address to primary and demotes the previous primary to an
+ * alias. Do not use it to manage secondary emails as a multi-valued attribute.
+ *
  * `addRecordValues` / `removeRecordValues` are used by `updateRecordPermissions`
  * only — `updateUser` ignores them.
  */
@@ -72,6 +76,8 @@ export interface UpdateUserOptions {
     removeRoleValues?: string[]
     addTeamValues?: string[]
     removeTeamValues?: string[]
+    addAliasValues?: string[]
+    removeAliasValues?: string[]
     addRecordValues?: string[]
     removeRecordValues?: string[]
 }
@@ -283,9 +289,16 @@ export class KeeperClient {
      * and short-circuit on `null` — this method assumes the user exists and
      * will surface a Commander error if they don't.
      */
+    /**
+     * Remove a Keeper enterprise user by transferring their vault to the
+     * configured target user in service mode, then deleting the
+     * source account. Maps ISC `std:account:delete` to Commander's
+     * `transfer-user "<leaving>" -f`.
+     *  sailpoint-app-setup command will append "--target-user "<target>"" to the command.
+     */
     async deleteUser(email: string): Promise<void> {
         const { safe } = this.normalizeEmailArg(email, 'deleteUser')
-        await this.runCommand(`enterprise-user "${safe}" --delete --force`)
+        await this.runCommand(`transfer-user "${safe}" -f`)
     }
 
     /**
@@ -341,8 +354,10 @@ export class KeeperClient {
 
         for (const v of options.removeRoleValues ?? []) parts.push(`--remove-role "${this.escapeArg(v)}"`)
         for (const v of options.removeTeamValues ?? []) parts.push(`--remove-team "${this.escapeArg(v)}"`)
+        for (const v of options.removeAliasValues ?? []) parts.push(`--delete-alias "${this.escapeArg(v)}"`)
         for (const v of options.addRoleValues ?? []) parts.push(`--add-role "${this.escapeArg(v)}"`)
         for (const v of options.addTeamValues ?? []) parts.push(`--add-team "${this.escapeArg(v)}"`)
+        for (const v of options.addAliasValues ?? []) parts.push(`--add-alias "${this.escapeArg(v)}"`)
 
         if (parts.length === 1) {
             logger.info(

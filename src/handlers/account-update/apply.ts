@@ -13,24 +13,27 @@ import { errorMessage, OperationFailure } from './errors'
 import {
     hasDeltaWork,
     hasUserMutation,
+    plannedNewEmail,
     primaryUserMutationAttribute,
     toUserUpdateOptions,
+    withoutEmailRename,
     UpdatePlan,
 } from './plan'
 
 export async function applyUpdatePlan(client: KeeperClient, email: string, plan: UpdatePlan): Promise<OperationFailure[]> {
     const failures: OperationFailure[] = []
-
-    // Profile / roles / teams — one Commander call. On failure, still continue
-    // with independent folder/record ops so one enterprise-user error does not
-    // skip the rest of the plan.
     const userOpts = toUserUpdateOptions(plan)
-    if (hasUserMutation(userOpts)) {
+    const newEmail = plannedNewEmail(plan)
+    const profileOpts = withoutEmailRename(userOpts)
+
+    // Profile / roles / teams first (still addressed by the current primary).
+    // Email rename runs last so folder/record ops keep a known-good identity.
+    if (hasUserMutation(profileOpts)) {
         try {
-            await client.updateUser(userOpts)
+            await client.updateUser(profileOpts)
         } catch (err) {
             failures.push({
-                attribute: primaryUserMutationAttribute(userOpts),
+                attribute: primaryUserMutationAttribute(profileOpts),
                 action: 'update node/roles/teams',
                 target: email,
                 message: errorMessage(err),
@@ -47,6 +50,23 @@ export async function applyUpdatePlan(client: KeeperClient, email: string, plan:
         logger.info(`Updating Keeper record permissions for ${email}`)
         failures.push(...(await applyRecordChanges(client, email, [...plan.records.adds], [...plan.records.removes])))
         logger.info(`Finished Keeper record permission updates for ${email}`)
+    }
+
+    // Keeper `--add-alias <new>` promotes <new> to primary and demotes the
+    // current address to an alias — this is the supported email rename path.
+    if (newEmail) {
+        try {
+            logger.info(`Renaming Keeper account email ${email} → ${newEmail}`)
+            await client.updateUser({ email, addAliasValues: [newEmail] })
+        } catch (err) {
+            failures.push({
+                attribute: 'email',
+                action: 'rename email via add-alias',
+                target: newEmail,
+                message: errorMessage(err),
+            })
+            logger.warn(`Email rename failed for ${email} → ${newEmail}: ${errorMessage(err)}`)
+        }
     }
 
     return failures

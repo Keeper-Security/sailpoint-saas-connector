@@ -19,8 +19,10 @@ import { resolveAccountEmail } from '../utils/identity'
  *   3. If the user is already gone, return success — delete is idempotent.
  *   4. Refuse if the target *is* the Commander service account itself; deleting
  *      it would strand the source without working credentials.
- *   5. Ask Commander to delete the user, then return an empty response body
- *      (StdAccountDeleteOutput is `{}` — ISC just needs the success signal).
+ *   5. Transfer the user's vault to the configured target user via Commander's
+ *      `transfer-user` (which removes the leaving account), then return an
+ *      empty response body (StdAccountDeleteOutput is `{}` — ISC just needs
+ *      the success signal).
  *
  * Note: there is no read-back at the end (the account is gone by design).
  */
@@ -51,7 +53,7 @@ export function createAccountDeleteHandler(client: KeeperClient) {
         }
 
         await client.deleteUser(email)
-        logger.info(`Deleted Keeper vault account ${email}`)
+        logger.info(`Transferred and removed Keeper vault account ${email}`)
 
         res.send({})
     }
