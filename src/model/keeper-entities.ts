@@ -9,12 +9,25 @@ export interface KeeperUser {
     name?: string
     status?: string
     transfer_status?: string
+    /**
+     * Node id (stable string). Newer Commander returns
+     * `{ node_id, node_name }` under `-v --format json`; `KeeperClient`
+     * normalizes to the id before handing the record downstream.
+     */
     node?: string
     team_count?: number
-    /** Team memberships as `team_uid` values (stable IDs). */
+    /**
+     * Team memberships as `team_uid` values. Newer Commander returns
+     * `[{ team_uid, team_name }, ...]`; `KeeperClient` normalizes to
+     * `team_uid[]` before handing the record downstream.
+     */
     teams?: string[]
     role_count?: number
-    /** Role memberships as `role_id` values serialized as strings. */
+    /**
+     * Role memberships as `role_id` values (stringified). Newer Commander
+     * returns `[{ role_id, role_name }, ...]`; `KeeperClient` normalizes to
+     * `role_id[]` before handing the record downstream.
+     */
     roles?: string[]
     alias?: string[]
     job_title?: string

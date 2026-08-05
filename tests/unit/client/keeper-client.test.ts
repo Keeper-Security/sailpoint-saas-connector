@@ -233,6 +233,58 @@ describe('KeeperClient', () => {
         await expect(client.listUsers()).rejects.toThrow(/Unexpected Keeper users/)
     })
 
+    it('listUsers normalizes newer Commander object-shaped node/teams/roles to stable IDs', async () => {
+        // Real Commander payload shape from `enterprise-info --users -v --format json`
+        // (see docs: "the `roles` column returns objects of the form `[{role_id, role_name}]`").
+        mockCommandSuccess([
+            {
+                user_id: 70411693853269,
+                email: 'sshrushanth@keepersecurity.com',
+                name: 'Shrushanth S',
+                status: 'Active',
+                node: { node_id: '70411693850626', node_name: 'Keeper Security' },
+                teams: [
+                    { team_uid: 'RqX_L5yE1XjWeHvNyMcbiw', team_name: 'teamuk' },
+                    { team_uid: 'zlnqXGw9TLHTJocOQqJ7ug', team_name: 'Admin' },
+                ],
+                roles: [
+                    { role_id: '70411693850812', role_name: 'Administrator' },
+                    { role_id: '70411693850628', role_name: 'Keeper Administrator' },
+                ],
+            },
+        ])
+        const [normalized] = await client.listUsers()
+        expect(normalized.node).toBe('70411693850626')
+        expect(normalized.teams).toEqual(['RqX_L5yE1XjWeHvNyMcbiw', 'zlnqXGw9TLHTJocOQqJ7ug'])
+        expect(normalized.roles).toEqual(['70411693850812', '70411693850628'])
+    })
+
+    it('listUsers preserves legacy scalar-string node/teams/roles and skips malformed entries', async () => {
+        mockCommandSuccess([
+            {
+                user_id: 1,
+                email: 'legacy@example.test',
+                node: '100',
+                teams: ['team-a', '  team-b  ', '', null],
+                roles: [42, 'role-b', { role_id: '', role_name: 'empty-id' }],
+            },
+            {
+                user_id: 2,
+                email: 'empties@example.test',
+                node: {},
+                teams: 'not-an-array',
+                roles: [],
+            },
+        ])
+        const [legacy, empties] = await client.listUsers()
+        expect(legacy.node).toBe('100')
+        expect(legacy.teams).toEqual(['team-a', 'team-b'])
+        expect(legacy.roles).toEqual(['42', 'role-b'])
+        expect(empties.node).toBeUndefined()
+        expect(empties.teams).toEqual([])
+        expect(empties.roles).toEqual([])
+    })
+
     it('getUser matches exact email and rejects empty', async () => {
         await expect(client.getUser('  ')).rejects.toThrow(/empty email/)
         mockCommandSuccess([
@@ -245,6 +297,28 @@ describe('KeeperClient', () => {
         })
         mockCommandSuccess([{ user_id: 2, email: 'other@example.test' }])
         await expect(client.getUser('alice@example.test')).resolves.toBeNull()
+    })
+
+    it('getUser normalizes object-shaped node/teams/roles from Commander', async () => {
+        mockCommandSuccess([
+            {
+                user_id: 1,
+                email: 'alice@example.test',
+                node: { node_id: '100', node_name: 'Root' },
+                teams: [{ team_uid: 't1', team_name: 'Alpha' }],
+                roles: [{ role_id: '9', role_name: 'Admin' }],
+            },
+        ])
+        const user = await client.getUser('alice@example.test')
+        expect(user).toEqual(
+            expect.objectContaining({
+                user_id: 1,
+                email: 'alice@example.test',
+                node: '100',
+                teams: ['t1'],
+                roles: ['9'],
+            })
+        )
     })
 
     it('lock/unlock/delete/sync/list commands', async () => {

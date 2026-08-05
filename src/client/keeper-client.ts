@@ -86,6 +86,78 @@ function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+/**
+ * Coerce Commander's `--format json -v` value for a single membership entry
+ * into its stable ID string. Newer Commander returns objects such as
+ * `{ node_id, node_name }`, `{ team_uid, team_name }`, or
+ * `{ role_id, role_name }` (see docs: "the `roles` column returns objects of
+ * the form `[{role_id, role_name}]`"). Older versions returned scalar strings.
+ * We accept both shapes and always return the stable ID as a trimmed string,
+ * or `undefined` when nothing usable can be extracted so callers can drop it.
+ *
+ * `idKeys` is checked in order — pass the object's ID key first (e.g.
+ * `'node_id'`) so we prefer it over any incidental name field.
+ */
+function extractStableId(value: unknown, ...idKeys: string[]): string | undefined {
+    if (value == null) return undefined
+    if (typeof value === 'string') {
+        const trimmed = value.trim()
+        return trimmed || undefined
+    }
+    if (typeof value === 'number' || typeof value === 'bigint') {
+        return String(value)
+    }
+    if (typeof value === 'object' && !Array.isArray(value)) {
+        const record = value as Record<string, unknown>
+        for (const key of idKeys) {
+            const candidate = record[key]
+            if (candidate != null) {
+                const asString =
+                    typeof candidate === 'string' ? candidate.trim() : String(candidate).trim()
+                if (asString) return asString
+            }
+        }
+    }
+    return undefined
+}
+
+/** Same as {@link extractStableId} but for the array-valued columns (teams, roles). */
+function extractStableIdArray(value: unknown, ...idKeys: string[]): string[] {
+    if (!Array.isArray(value)) return []
+    const out: string[] = []
+    for (const entry of value) {
+        const id = extractStableId(entry, ...idKeys)
+        if (id) out.push(id)
+    }
+    return out
+}
+
+/**
+ * Normalize a raw user record from `enterprise-info --users --format json -v`
+ * so the rest of the connector can rely on `KeeperUser.node` being a
+ * `node_id` string, `teams` being `team_uid[]`, and `roles` being
+ * `role_id[]`. Commander started wrapping these in `{id, name}` objects in
+ * newer releases — we unwrap here so downstream code (account handlers,
+ * mappings) does not have to care about the wire format.
+ *
+ * Fields that were absent on the raw record stay absent (so behavior matches
+ * older Commander responses that simply omit the column).
+ */
+function normalizeUserRecord(user: KeeperUser): KeeperUser {
+    const raw = user as unknown as Record<string, unknown>
+    const normalized: KeeperUser = { ...user }
+    if (raw.node !== undefined) {
+        normalized.node = extractStableId(raw.node, 'node_id')
+    }
+    if (raw.teams !== undefined) {
+        normalized.teams = extractStableIdArray(raw.teams, 'team_uid')
+    }
+    if (raw.roles !== undefined) {
+        normalized.roles = extractStableIdArray(raw.roles, 'role_id')
+    }
+    return normalized
+}
+
 function resolvePollTimeoutMs(value: string | number | undefined | null): number {
     if (value == null || value === '') {
         return DEFAULT_POLL_TIMEOUT_SECONDS * 1000
@@ -239,7 +311,8 @@ export class KeeperClient {
 
     async listUsers(): Promise<KeeperUser[]> {
         const result = await this.runCommand(`enterprise-info --users --format json -v --columns ${USER_COLUMNS}`)
-        return this.parseArrayData<KeeperUser>(result.data, 'users')
+        const users = this.parseArrayData<KeeperUser>(result.data, 'users')
+        return users.map(normalizeUserRecord)
     }
 
     /**
@@ -257,7 +330,7 @@ export class KeeperClient {
 
         // Commander pattern is a substring/glob match, so filter to an exact email hit.
         const match = users.find((u) => u?.email?.toLowerCase() === trimmed.toLowerCase())
-        return match ?? null
+        return match ? normalizeUserRecord(match) : null
     }
 
     /**
