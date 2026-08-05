@@ -453,25 +453,33 @@ export class KeeperClient {
     }
 
     private createRecordCommand(recordId: string, email: string): string {
-        const assignPerm = recordId.split(':')[1]
+        // Route email through the same normalize + escape pipeline every other
+        // command builder uses so an attacker-controlled email cannot inject
+        // extra Commander flags via whitespace-split argv.
+        const { safe: safeEmail } = this.normalizeEmailArg(email, 'updateRecordPermissions')
+
+        const [rawUid, assignPerm] = recordId.split(':')
+        // Record UID is interpolated inside "..."; escape it so an embedded
+        // quote cannot close the wrap and inject additional argv tokens.
+        const safeUid = this.escapeArg((rawUid ?? '').trim())
 
         switch (assignPerm) {
             case 'RO':
-                return `share-record -e ${email} "${recordId.split(':')[0]}"`
+                return `share-record -e "${safeEmail}" "${safeUid}"`
             case 'CE':
-                return `share-record -e ${email} "${recordId.split(':')[0]}" --write`
+                return `share-record -e "${safeEmail}" "${safeUid}" --write`
             case 'CS':
-                return `share-record -e ${email} "${recordId.split(':')[0]}" --share`
+                return `share-record -e "${safeEmail}" "${safeUid}" --share`
             case 'VW':
-                return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r viewer`
+                return `nsf-share-record -e "${safeEmail}" "${safeUid}" -r viewer`
             case 'SM':
-                return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r share-manager`
+                return `nsf-share-record -e "${safeEmail}" "${safeUid}" -r share-manager`
             case 'FM':
-                return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r full-manager`
+                return `nsf-share-record -e "${safeEmail}" "${safeUid}" -r full-manager`
             case 'CSM':
-                return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r content-share-manager`
+                return `nsf-share-record -e "${safeEmail}" "${safeUid}" -r content-share-manager`
             case 'CM':
-                return `nsf-share-record -e ${email} "${recordId.split(':')[0]}" -r content-manager`
+                return `nsf-share-record -e "${safeEmail}" "${safeUid}" -r content-manager`
             case 'OW':
                 throw new ConnectorError(`Ownership change is restricted. Please perform this action on Keeper Vault.`)
             default:
@@ -498,12 +506,28 @@ export class KeeperClient {
     }
 
     /**
-     * Escape double quotes inside an argument value so Commander's argparse
-     * parser doesn't split the string. Values are wrapped in `"..."` at the
-     * call site; this ensures embedded quotes don't terminate that wrap.
+     * Escape an argument value that will be wrapped in `"..."` at the call
+     * site so Commander's shlex-style parser tokenizes it as a single arg.
+     *
+     * Two hardening steps beyond naive `"` escaping:
+     *
+     * 1. Backslashes are escaped **before** double quotes. A trailing `\` in
+     *    the raw value would otherwise land next to the wrapping `"` and
+     *    escape it, leaving the string unterminated so the next flag gets
+     *    absorbed into this arg.
+     * 2. C0 control characters that can reset a line-based parser
+     *    (`\0`, `\r`, `\n`) are rejected outright — legitimate emails, UIDs,
+     *    role/team ids, names, job titles, and node ids never contain them,
+     *    and allowing them through provides no functional value while
+     *    enabling command-boundary injection against Commander's queue.
      */
     private escapeArg(value: string): string {
-        return value.replace(/"/g, '\\"')
+        if (/[\x00\r\n]/.test(value)) {
+            throw new ConnectorError(
+                'Refusing to build Commander command: value contains a control character (NUL, CR, or LF)'
+            )
+        }
+        return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
     }
 
     async syncEnterprise(): Promise<void> {
