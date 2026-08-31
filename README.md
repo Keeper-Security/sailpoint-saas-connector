@@ -48,6 +48,7 @@ Before configuring a source in ISC, ensure the following:
 1. **Keeper enterprise** with administrative access to manage users, teams, roles, and sharing.
 2. **Keeper Commander Service Mode** running and reachable from SailPoint’s cloud (or your allowed network path), with a valid Service Mode API key.
 3. **SailPoint ISC** admin permissions to create sources, configure correlation, and run aggregations.
+4. **SailPoint CLI** must be install on your machine to manage the connector lifecycles.
 
 > **Network:** The Service Mode URL must be reachable from the ISC connector runtime. For private or firewall-restricted Commander hosts, expose Service Mode with a supported tunnel such as **ngrok** or **Cloudflare Tunnel**, then use the public tunnel URL as the Service Mode API URL in the source configuration.
 
@@ -174,13 +175,80 @@ My Vault> sailpoint-app-setup \
 
 ---
 
-## Install from the Marketplace
+## Install and Authenticate SailPoint CLI
 
-1. In ISC, open **Admin → Connections → Sources** (or the **Marketplace / Connector Catalog**, depending on your tenant UI).
-2. Find **Keeper Security** and select **Configure** / **Create Source**.
-3. Complete the source configuration fields below, then save.
-4. Run **Test Connection**.
-5. Configure **account correlation**, then run **entitlement aggregation** followed by **account aggregation**.
+To install and configure the CLI on your machine, follow the official [SailPoint CLI setup instructions here](https://developer.sailpoint.com/docs/tools/cli).
+
+Make sure the CLI is authenticated with your SailPoint Identity Security Cloud (ISC) tenant before proceeding.
+
+## Download the Connector ZIP
+
+1. Go to the [Keeper Security SailPoint Connector Releases](https://github.com/Keeper-Security/sailpoint-saas-connector/releases) page.
+2. Locate the latest release.
+3. Download the connector ZIP file, typically named:
+
+```text
+keeper-security-<version>.zip
+```
+
+4. Open a terminal in the directory containing the downloaded ZIP file.
+
+## Upload to your SailPoint Tenant
+
+Once the SailPoint CLI is installed and authenticated, upload the connector ZIP file to your ISC tenant.
+
+#### Create an empty connector
+
+Run:
+
+```bash
+sail conn create keeper-security
+```
+This creates an empty connector in your ISC tenant and returns a **Connector ID**.
+
+### Upload the Connector ZIP
+
+Using the connector name:
+
+```bash
+sail conn upload -c keeper-security -f ./keeper-security-<latest-version>.zip
+```
+
+Or using the Connector ID returned by the create command:
+
+```bash
+sail conn upload -c <connector-id> -f ./keeper-security-<latest-version>.zip
+```
+
+> **Note:** Replace `<latest-version>` with the version of the downloaded connector ZIP.
+
+#### Verify and Configure
+
+Verify that the connector has been uploaded successfully:
+
+```bash
+sail conn list
+```
+
+The Keeper Security connector should appear in the list of connectors.
+
+> **Note:** For detailed information on uploading connectors, see [SailPoint's Connector Upload documentation](https://developer.sailpoint.com/docs/connectivity/saas-connectivity/test-build-deploy#upload-connector-zip-file-to-identity-security-cloud).
+
+---
+
+## Setup the connector from ISC
+
+After successfully uploading the connector ZIP, configure the connector in your SailPoint Identity Security Cloud tenant.
+
+1. In ISC, navigate to **Admin → Connections → Sources**.
+2. Select **Create New**.
+3. Search for **Keeper Security** and select the connector.
+4. Select **Configure**.
+5. Complete the [Source Configuration](#source-configuration) fields described below.
+6. Save the source configuration.
+7. Run **Test Connection** to verify the configuration.
+
+> **Note:** The exact navigation and UI labels may vary depending on your SailPoint ISC tenant and UI version.
 
 ---
 
