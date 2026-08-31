@@ -2,6 +2,8 @@
 
 Govern Keeper Security enterprise users and access from SailPoint Identity Security Cloud (ISC). This SaaS connector integrates with **Keeper Commander Service Mode API v2** so you can aggregate accounts and entitlements, correlate identities, and provision access without custom scripts.
 
+[Setup Instructions](https://docs.keeper.io/keeperpam/secrets-manager/integrations/sailpoint-saas-connector)
+
 ---
 
 ## Overview
