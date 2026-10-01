@@ -261,6 +261,7 @@ After successfully uploading the connector ZIP, configure the connector in your 
 | **Keeper Commander Service Mode API URL** | Yes | Base URL of Commander Service Mode **without** the `/api/v2/` path (example: `https://commander.example.com`) |
 | **Keeper Commander Service Mode API Key** | Yes | Service Mode API key used for authentication |
 | **Keeper Service Mode Poll Timeout (seconds)** | No | How long the connector waits for a Commander command to finish. Default: `60` |
+| **Keeper Sync Cache TTL (seconds)** | No | How long a full enterprise/vault sync is considered fresh before the next account/entitlement request forces another one. Default: `30` |
 
 ---
 

@@ -10,6 +10,7 @@ import {
 import { KeeperClient } from '../client/keeper-client'
 import { loadAccountView } from '../utils/account-view'
 import { resolveAccountEmail } from '../utils/identity'
+import { assertNotServiceAccount } from '../utils/helper'
 
 export type AccountLockAction = 'lock' | 'unlock'
 
@@ -31,6 +32,10 @@ export function createAccountLockHandler(client: KeeperClient, action: AccountLo
 
         logger.info(`${gerund} Keeper vault account ${email}`)
         if (action === 'lock') {
+            // Locking invalidates the Commander service-mode credential this
+            // connector authenticates with; there is no automatic recovery
+            // path once that happens, so refuse it same as delete.
+            await assertNotServiceAccount(client, email, 'disable', 'Disabling')
             await client.lockUser(email)
         } else {
             await client.unlockUser(email)

@@ -42,6 +42,13 @@
 							"type": "number",
 							"required": false,
 							"placeholder": "Default is 60 seconds"
+						},
+						{
+							"key": "syncCacheTtlSeconds",
+							"label": "Keeper Sync Cache TTL (seconds)",
+							"type": "number",
+							"required": false,
+							"placeholder": "Default is 30 seconds"
 						}
 					]
 				}

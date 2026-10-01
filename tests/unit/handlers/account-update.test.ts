@@ -437,6 +437,26 @@ describe('account-update handler', () => {
         expect(client.updateUser).not.toHaveBeenCalled()
     })
 
+    it('blocks mutations against the service account', async () => {
+        const client = createMockKeeperClient({
+            getUser: jest.fn().mockResolvedValue(alice),
+            listVaultTree: jest.fn().mockResolvedValue(mockVaultTree),
+            getWhoami: jest.fn().mockResolvedValue({ user: 'alice@example.test' }),
+        })
+        const { res } = createMockResponse()
+        await expect(
+            createAccountUpdateHandler(asKeeperClient(client))(
+                createMockContext(),
+                {
+                    identity: 'alice@example.test',
+                    changes: [{ attribute: 'name', op: AttributeChangeOp.Set, value: 'Alice Updated' }],
+                } as any,
+                res
+            )
+        ).rejects.toThrow(/Commander service account/)
+        expect(client.updateUser).not.toHaveBeenCalled()
+    })
+
     it('applies plan and returns account; throws on partial failure', async () => {
         const client = createMockKeeperClient({
             getUser: jest.fn().mockResolvedValue(alice),

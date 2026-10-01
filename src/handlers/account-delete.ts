@@ -1,5 +1,4 @@
 import {
-    ConnectorError,
     Context,
     logger,
     Response,
@@ -8,6 +7,7 @@ import {
 } from '@sailpoint/connector-sdk'
 import { KeeperClient } from '../client/keeper-client'
 import { resolveAccountEmail } from '../utils/identity'
+import { assertNotServiceAccount } from '../utils/helper'
 
 /**
  * Handler for `std:account:delete`.
@@ -45,12 +45,7 @@ export function createAccountDeleteHandler(client: KeeperClient) {
             return
         }
 
-        const me = await client.getWhoami()
-        if (me.user && me.user.toLowerCase() === email.toLowerCase()) {
-            throw new ConnectorError(
-                `Refusing to delete "${email}" — this is the Commander service account backing the SailPoint source. Deleting it would break provisioning.`
-            )
-        }
+        await assertNotServiceAccount(client, email, 'delete', 'Deleting')
 
         await client.deleteUser(email)
         logger.info(`Transferred and removed Keeper vault account ${email}`)
