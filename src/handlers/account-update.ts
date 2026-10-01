@@ -2,6 +2,7 @@ import { ConnectorError, Context, logger, Response, StdAccountUpdateInput, StdAc
 import { KeeperClient } from '../client/keeper-client'
 import { loadAccountView } from '../utils/account-view'
 import { resolveAccountEmail } from '../utils/identity'
+import { assertNotServiceAccount } from '../utils/helper'
 import { applyUpdatePlan } from './account-update/apply'
 import { formatAggregatedError, toAttributeResults } from './account-update/errors'
 import {
@@ -43,6 +44,11 @@ export function createAccountUpdateHandler(client: KeeperClient) {
             res.send(await loadAccountView(client, email))
             return
         }
+
+        // Role/node/team/profile mutations against the Commander service
+        // account can silently strip the privileges it needs to run; refuse
+        // same as delete rather than degrading provisioning without error.
+        await assertNotServiceAccount(client, email, 'update', 'Updating')
 
         logger.info(`Updating Keeper vault account ${email}`)
         const failures = await applyUpdatePlan(client, email, plan)

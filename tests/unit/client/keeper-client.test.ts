@@ -76,6 +76,48 @@ describe('KeeperClient', () => {
         )
     })
 
+    it('defaults syncCacheTtlSeconds to 30 and validates overrides', () => {
+        expect((new KeeperClient(mockConfig) as any).syncCacheTtlMs).toBe(30_000)
+        expect(
+            (new KeeperClient({ ...mockConfig, syncCacheTtlSeconds: '5' }) as any).syncCacheTtlMs
+        ).toBe(5_000)
+        expect(
+            (new KeeperClient({ ...mockConfig, syncCacheTtlSeconds: 'abc' }) as any).syncCacheTtlMs
+        ).toBe(30_000)
+        expect(
+            (new KeeperClient({ ...mockConfig, syncCacheTtlSeconds: -1 }) as any).syncCacheTtlMs
+        ).toBe(30_000)
+    })
+
+    it('caches syncEnterprise/syncVault within the TTL and coalesces concurrent calls', async () => {
+        mockCommandSuccess([])
+        await client.syncEnterprise()
+        const postsAfterFirstSync = mockedAxios.post.mock.calls.length
+
+        // Second call within the TTL window must not submit another command.
+        await client.syncEnterprise()
+        expect(mockedAxios.post.mock.calls.length).toBe(postsAfterFirstSync)
+
+        // Concurrent callers share the same in-flight sync.
+        mockCommandSuccess([])
+        await Promise.all([client.syncVault(), client.syncVault()])
+        expect(mockedAxios.post.mock.calls.length).toBe(postsAfterFirstSync + 1)
+    })
+
+    it('invalidates the enterprise/vault sync cache after a mutation', async () => {
+        mockCommandSuccess([])
+        await client.syncEnterprise()
+        const postsAfterFirstSync = mockedAxios.post.mock.calls.length
+
+        mockCommandSuccess([])
+        await client.lockUser('a@example.test')
+
+        // lockUser invalidated the cache, so the next syncEnterprise re-syncs.
+        mockCommandSuccess([])
+        await client.syncEnterprise()
+        expect(mockedAxios.post.mock.calls.length).toBe(postsAfterFirstSync + 2)
+    })
+
     it('testConnection submits whoami and polls until success', async () => {
         mockAcceptedSubmit('req-123')
         mockedAxios.get

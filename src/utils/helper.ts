@@ -9,6 +9,7 @@ import {
     KeeperVaultTreeData,
     KeeperVaultTreeNode,
 } from '../model/keeper-entities'
+import { KeeperClient } from '../client/keeper-client'
 
 /** Intermediate record node collected while walking the vault tree. */
 interface VaultRecordNode {
@@ -249,4 +250,25 @@ export function requireSingleNodeId(value: unknown, emptyMessage = 'attribute "n
         throw new ConnectorError(`node is single-valued; expected one node id, got ${values.length}`)
     }
     return values[0]
+}
+
+/**
+ * Refuse a mutation against the Commander service account itself — the
+ * Keeper user whose credential this connector authenticates as. Deleting,
+ * disabling, or updating it (e.g. stripping its admin role/node/team
+ * assignments) strands the source with no working provisioning credentials
+ * and no automatic recovery path, since the connector itself is what broke.
+ */
+export async function assertNotServiceAccount(
+    client: KeeperClient,
+    email: string,
+    action: string,
+    gerund: string
+): Promise<void> {
+    const me = await client.getWhoami()
+    if (me.user && me.user.toLowerCase() === email.toLowerCase()) {
+        throw new ConnectorError(
+            `Refusing to ${action} "${email}" — this is the Commander service account backing the SailPoint source. ${gerund} it would break provisioning.`
+        )
+    }
 }
