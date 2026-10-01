@@ -21,6 +21,7 @@ const ROLE_COLUMNS = 'visible_below,default_role,admin,node,user_count,users,tea
 const NODE_COLUMNS = 'parent_node,parent_id,user_count,users,team_count,teams,role_count,roles,provisioning,isolated'
 
 const DEFAULT_POLL_TIMEOUT_SECONDS = 60
+const DEFAULT_SYNC_CACHE_TTL_SECONDS = 30
 const INITIAL_POLL_DELAY_MS = 500
 const MAX_POLL_DELAY_MS = 5_000
 
@@ -171,10 +172,30 @@ function resolvePollTimeoutMs(value: string | number | undefined | null): number
     return seconds * 1000
 }
 
+function resolveSyncCacheTtlMs(value: string | number | undefined | null): number {
+    if (value == null || value === '') {
+        return DEFAULT_SYNC_CACHE_TTL_SECONDS * 1000
+    }
+
+    const seconds = typeof value === 'number' ? value : Number(value)
+    if (!Number.isFinite(seconds) || seconds < 0) {
+        return DEFAULT_SYNC_CACHE_TTL_SECONDS * 1000
+    }
+
+    return seconds * 1000
+}
+
+/** Per-sync-kind state backing `KeeperClient`'s TTL + single-flight sync cache. */
+interface SyncCacheState {
+    lastSyncAt: number | null
+    inFlight: Promise<void> | null
+}
+
 export class KeeperClient {
     private readonly serviceModeApiUrl: string
     private readonly serviceModeApiKey: string
     private readonly pollTimeoutMs: number
+    private readonly syncCacheTtlMs: number
 
     /**
      * Cached `whoami` snapshot. Populated the first time `testConnection` or
@@ -183,10 +204,25 @@ export class KeeperClient {
      */
     private whoamiCache: WhoamiInfo | null = null
 
+    /**
+     * TTL + single-flight state for `syncEnterprise()` / `syncVault()`. Every
+     * handler calls those unconditionally before reading, which otherwise
+     * means every std:account/entitlement request forces two full
+     * enterprise/vault re-downloads. Within `syncCacheTtlMs` of a successful
+     * sync we skip the remote call entirely; concurrent callers during an
+     * in-flight sync share one promise instead of issuing their own.
+     * Mutating methods reset `lastSyncAt` via `invalidateEnterpriseSync()` /
+     * `invalidateVaultSync()` so a read immediately after a write always
+     * re-syncs rather than serving pre-mutation state.
+     */
+    private enterpriseSyncState: SyncCacheState = { lastSyncAt: null, inFlight: null }
+    private vaultSyncState: SyncCacheState = { lastSyncAt: null, inFlight: null }
+
     constructor(config: SourceConfig) {
         this.serviceModeApiUrl = requireConfigValue(config?.serviceModeApiUrl, 'serviceModeApiUrl')
         this.serviceModeApiKey = requireConfigValue(config?.serviceModeApiKey, 'serviceModeApiKey')
         this.pollTimeoutMs = resolvePollTimeoutMs(config?.pollTimeoutSeconds)
+        this.syncCacheTtlMs = resolveSyncCacheTtlMs(config?.syncCacheTtlSeconds)
     }
 
     private get baseUrl(): string {
@@ -340,6 +376,7 @@ export class KeeperClient {
     async lockUser(email: string): Promise<void> {
         const { safe } = this.normalizeEmailArg(email, 'lockUser')
         await this.runCommand(`enterprise-user "${safe}" --lock`)
+        this.invalidateEnterpriseSync()
     }
 
     /**
@@ -349,6 +386,7 @@ export class KeeperClient {
     async unlockUser(email: string): Promise<void> {
         const { safe } = this.normalizeEmailArg(email, 'unlockUser')
         await this.runCommand(`enterprise-user "${safe}" --unlock`)
+        this.invalidateEnterpriseSync()
     }
 
     /**
@@ -372,6 +410,10 @@ export class KeeperClient {
     async deleteUser(email: string): Promise<void> {
         const { safe } = this.normalizeEmailArg(email, 'deleteUser')
         await this.runCommand(`transfer-user "${safe}" -f`)
+        // transfer-user removes the enterprise user and moves their vault
+        // contents to the target user, so both trees are now stale.
+        this.invalidateEnterpriseSync()
+        this.invalidateVaultSync()
     }
 
     /**
@@ -402,6 +444,7 @@ export class KeeperClient {
         for (const v of options.addTeamValues ?? []) parts.push(`--add-team "${this.escapeArg(v)}"`)
 
         await this.runCommand(parts.join(' '))
+        this.invalidateEnterpriseSync()
     }
 
     /**
@@ -440,6 +483,7 @@ export class KeeperClient {
         }
 
         await this.runCommand(parts.join(' '))
+        this.invalidateEnterpriseSync()
     }
 
     async updateRecordPermissions(options: UpdateUserOptions): Promise<void> {
@@ -449,6 +493,10 @@ export class KeeperClient {
 
         for (const v of options.removeRecordValues ?? []) {
             await this.runCommand(this.createRecordCommand(v, options.email) + ' --action revoke')
+        }
+
+        if ((options.addRecordValues?.length ?? 0) > 0 || (options.removeRecordValues?.length ?? 0) > 0) {
+            this.invalidateVaultSync()
         }
     }
 
@@ -531,11 +579,45 @@ export class KeeperClient {
     }
 
     async syncEnterprise(): Promise<void> {
-        await this.runCommand('enterprise-down -f')
+        await this.runCachedSync(this.enterpriseSyncState, 'enterprise-down -f')
     }
 
     async syncVault(): Promise<void> {
-        await this.runCommand('sync-down -f')
+        await this.runCachedSync(this.vaultSyncState, 'sync-down -f')
+    }
+
+    /**
+     * Run a forced full sync at most once per `syncCacheTtlMs`; callers
+     * within the window are served the already-synced state instead of
+     * triggering another `-f` round-trip. Concurrent callers during an
+     * in-flight sync share one promise rather than issuing their own.
+     */
+    private async runCachedSync(state: SyncCacheState, command: string): Promise<void> {
+        if (state.lastSyncAt !== null && Date.now() - state.lastSyncAt < this.syncCacheTtlMs) {
+            return
+        }
+
+        if (!state.inFlight) {
+            state.inFlight = this.runCommand(command)
+                .then(() => {
+                    state.lastSyncAt = Date.now()
+                })
+                .finally(() => {
+                    state.inFlight = null
+                })
+        }
+
+        return state.inFlight
+    }
+
+    /** Force the next `syncEnterprise()` to re-sync instead of serving cached state. */
+    private invalidateEnterpriseSync(): void {
+        this.enterpriseSyncState.lastSyncAt = null
+    }
+
+    /** Force the next `syncVault()` to re-sync instead of serving cached state. */
+    private invalidateVaultSync(): void {
+        this.vaultSyncState.lastSyncAt = null
     }
 
     async listVaultTree(): Promise<KeeperVaultTreeData> {
@@ -579,6 +661,7 @@ export class KeeperClient {
         await this.runCommand(
             `share-folder -a grant -e "${safeEmail}" -o ${manageUsers} -p ${manageRecords} "${safeUid}"`
         )
+        this.invalidateVaultSync()
     }
 
     /** Revoke classic shared-folder access (`share-folder -a remove -f`). */
@@ -586,6 +669,7 @@ export class KeeperClient {
         const { safe: safeEmail } = this.normalizeEmailArg(email, 'removeClassicFolderShare')
         const safeUid = this.escapeArg(folderUid.trim())
         await this.runCommand(`share-folder -a remove -e "${safeEmail}" -f "${safeUid}"`)
+        this.invalidateVaultSync()
     }
 
     /** Grant NSF folder access (`nsf-share-folder -a grant -r <role>`). */
@@ -593,6 +677,7 @@ export class KeeperClient {
         const { safe: safeEmail } = this.normalizeEmailArg(email, 'grantNsfFolderShare')
         const safeUid = this.escapeArg(folderUid.trim())
         await this.runCommand(`nsf-share-folder -a grant -e "${safeEmail}" -r ${role} "${safeUid}"`)
+        this.invalidateVaultSync()
     }
 
     /** Revoke NSF folder access (`nsf-share-folder -a remove`). */
@@ -600,6 +685,7 @@ export class KeeperClient {
         const { safe: safeEmail } = this.normalizeEmailArg(email, 'removeNsfFolderShare')
         const safeUid = this.escapeArg(folderUid.trim())
         await this.runCommand(`nsf-share-folder -a remove -e "${safeEmail}" "${safeUid}"`)
+        this.invalidateVaultSync()
     }
 
     /**

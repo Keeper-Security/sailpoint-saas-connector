@@ -185,6 +185,30 @@ describe('account handlers', () => {
         )
         expect(client.unlockUser).toHaveBeenCalledWith('alice@example.test')
     })
+
+    it('account-disable blocks the service account but allows enabling it', async () => {
+        const client = createMockKeeperClient({
+            getUser: jest.fn().mockResolvedValue(alice),
+            listVaultTree: jest.fn().mockResolvedValue(mockVaultTree),
+            getWhoami: jest.fn().mockResolvedValue({ user: 'alice@example.test' }),
+        })
+        await expect(
+            createAccountDisableHandler(asKeeperClient(client))(
+                createMockContext(),
+                { identity: 'alice@example.test' } as any,
+                createMockResponse().res
+            )
+        ).rejects.toThrow(/Commander service account/)
+        expect(client.lockUser).not.toHaveBeenCalled()
+
+        const { res: resEn } = createMockResponse()
+        await createAccountEnableHandler(asKeeperClient(client))(
+            createMockContext(),
+            { identity: 'alice@example.test' } as any,
+            resEn
+        )
+        expect(client.unlockUser).toHaveBeenCalledWith('alice@example.test')
+    })
 })
 
 describe('entitlement handlers', () => {
